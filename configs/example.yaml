@@ -1,0 +1,5 @@
+input: tests/fixtures/prices.csv
+output: tests/fixtures/factors_out.csv
+factors:
+  - momentum_20d
+  - mean_reversion_z_20d
