@@ -7,9 +7,9 @@ removed rather than merely shuffling rows.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import erf, sqrt
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
