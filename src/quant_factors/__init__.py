@@ -18,8 +18,8 @@ from quant_factors.validation import (
 )
 
 __all__ = [
-    "__version__",
     "ValidationSplit",
+    "__version__",
     "audit_feature_availability",
     "benjamini_hochberg",
     "compute_factors",
