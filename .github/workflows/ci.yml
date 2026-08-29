@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +22,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          python -m pip install --requirement requirements.lock
+          python -m pip install --no-deps --editable .
 
       - name: Ruff check
         run: ruff check src tests
+
+      - name: Ruff format check
+        run: ruff format --check src tests
 
       - name: Pytest
         run: pytest -q

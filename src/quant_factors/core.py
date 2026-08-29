@@ -102,8 +102,12 @@ _FACTOR_COMPUTERS: dict[str, callable] = {
     "volume_surge_5d": lambda c, v, h, low, pe, pb: volume_surge(v, 5, 20),
     "turnover_20d": lambda c, v, h, low, pe, pb: turnover(v, 20),
     "amihud_illiq_20d": lambda c, v, h, low, pe, pb: amihud_illiq(c, v, 20),
-    "pe_inv": lambda c, v, h, low, pe, pb: pe_inv(pe) if pe is not None else pd.Series(np.nan, index=c.index),
-    "pb_inv": lambda c, v, h, low, pe, pb: pb_inv(pb) if pb is not None else pd.Series(np.nan, index=c.index),
+    "pe_inv": lambda c, v, h, low, pe, pb: (
+        pe_inv(pe) if pe is not None else pd.Series(np.nan, index=c.index)
+    ),
+    "pb_inv": lambda c, v, h, low, pe, pb: (
+        pb_inv(pb) if pb is not None else pd.Series(np.nan, index=c.index)
+    ),
 }
 
 
