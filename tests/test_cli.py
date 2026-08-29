@@ -7,7 +7,9 @@ import pandas as pd
 
 
 def test_cli_list_json() -> None:
-    out = subprocess.check_output([sys.executable, "-m", "quant_factors.cli", "list", "--json"], text=True)
+    out = subprocess.check_output(
+        [sys.executable, "-m", "quant_factors.cli", "list", "--json"], text=True
+    )
     data = json.loads(out)
     assert "momentum_20d" in data
     assert len(data) >= 12

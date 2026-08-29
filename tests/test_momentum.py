@@ -18,7 +18,9 @@ def test_compute_momentum_family() -> None:
             "volume": 1000.0,
         }
     )
-    out = compute_factors(df, factors=["momentum_5d", "momentum_10d", "momentum_60d", "log_momentum_20d"])
+    out = compute_factors(
+        df, factors=["momentum_5d", "momentum_10d", "momentum_60d", "log_momentum_20d"]
+    )
     for col in ("momentum_5d", "momentum_10d", "momentum_60d", "log_momentum_20d"):
         assert col in out.columns
     assert out["momentum_5d"].notna().sum() > 0
