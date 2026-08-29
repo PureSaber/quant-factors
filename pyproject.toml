@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quant-factors"
-version = "0.2.0"
+version = "0.2.1"
 description = "Shared factor computation library for PureSaber quant research"
 readme = "README.md"
 license = { text = "MIT" }
@@ -12,11 +12,17 @@ requires-python = ">=3.10"
 dependencies = [
     "pandas>=2.0",
     "numpy>=1.24",
+    "pyarrow>=14.0",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4", "ruff>=0.9.0"]
+dev = ["pytest>=7.4", "pytest-cov>=5.0", "ruff>=0.9.0"]
+
+[tool.quant-workspace]
+layer = "strategy"
+schemas = [{ id = "standard/v2", version = "2.0.0" }]
+lock-files = ["requirements.lock"]
 
 [project.scripts]
 quant-factors = "quant_factors.cli:main"
@@ -27,6 +33,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = ["--cov=quant_factors", "--cov-branch", "--cov-report=term-missing", "--cov-fail-under=80"]
 
 [tool.ruff]
 line-length = 100
