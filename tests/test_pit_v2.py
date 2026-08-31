@@ -18,6 +18,7 @@ from quant_factors.pit_v2 import (
     arrow_table_logical_sha256,
     load_verified_auxiliary_source,
     select_auxiliary_version,
+    validate_auxiliary_inputs,
 )
 
 UTC_NS = pa.timestamp("ns", tz="UTC")
@@ -337,3 +338,32 @@ def test_selection_role_key_window_and_cross_snapshot_conflicts(tmp_path: Path) 
             observation_time=1_704_200_000_000_000_000,
             row_as_of=1_704_200_000_000_000_000,
         )
+
+
+def test_auxiliary_set_is_validated_before_any_market_row_queries(tmp_path: Path) -> None:
+    table = _table()
+    first_path = tmp_path / "first-global.parquet"
+    first = load_verified_auxiliary_source(first_path, _source(first_path, table))
+
+    second_path = tmp_path / "second-global.parquet"
+    second_source = replace(
+        _source(second_path, table),
+        snapshot_id="sha256-" + "6" * 64,
+    )
+    second = load_verified_auxiliary_source(second_path, second_source)
+    with pytest.raises(PitError, match="AUX_DUPLICATE_VERSION"):
+        validate_auxiliary_inputs([first, second])
+
+    mismatched_path = tmp_path / "mismatched-role.parquet"
+    mismatched_source = replace(
+        _source(mismatched_path, table),
+        snapshot_id="sha256-" + "7" * 64,
+        join_recipe="different-asof-v2",
+    )
+    mismatched = load_verified_auxiliary_source(mismatched_path, mismatched_source)
+    with pytest.raises(PitError, match="AUX_ROLE_CONTRACT_MISMATCH"):
+        validate_auxiliary_inputs([first, mismatched])
+
+    assert validate_auxiliary_inputs([first]) == (first,)
+    with pytest.raises(PitError, match="AUX_VERIFIED_INPUT_REQUIRED"):
+        validate_auxiliary_inputs([object()])  # type: ignore[list-item]
