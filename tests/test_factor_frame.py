@@ -66,11 +66,19 @@ TEST_POLICY = StoragePolicy(
     minimum_free_bytes=1,
     minimum_free_fraction=0.000001,
 )
+REAL_CODE_VERSION_RESOLVER = factor_frame_module._resolve_code_version
 
 
 @pytest.fixture(autouse=True)
-def _certified_build_commit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(factor_frame_module.CODE_VERSION_ENV, "a" * 40)
+def _certified_build_commit(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    if request.node.name != "test_code_version_uses_real_commit_provenance_and_fails_closed":
+        monkeypatch.setattr(
+            factor_frame_module,
+            "_resolve_code_version",
+            lambda: "commit:" + "a" * 40,
+        )
 
 
 def _bar_table() -> pa.Table:
@@ -199,12 +207,8 @@ def test_fixture_factor_frame_is_deterministic_and_never_market_certified() -> N
     assert hashlib.sha256(values[0].parquet_bytes).hexdigest() == (
         values[0].manifest.physical_sha256
     )
-    with pytest.raises(FactorFrameError, match="FACTOR_FRAME_PHYSICAL_HASH_MISMATCH"):
-        replace(
-            values[0],
-            parquet_bytes=b"forged",
-            _factory_token=factor_frame_module._FIXTURE_FRAME_TOKEN,
-        )
+    with pytest.raises(TypeError, match="dataclass"):
+        replace(values[0])
 
 
 def test_factor_frame_factory_scope_and_physical_logical_binding_are_unforgeable() -> None:
@@ -216,36 +220,43 @@ def test_factor_frame_factory_scope_and_physical_logical_binding_are_unforgeable
         [_factor()],
         as_of=AsOfSpec("source_available_at", None),
     )
+    fixture = factor_frame_module._verified_fixture(table, _fixture_manifest(table))
+    as_of = AsOfSpec("source_available_at", None)
     with pytest.raises(FactorFrameError, match="FACTOR_FRAME_FACTORY_REQUIRED"):
-        factor_frame_module.FactorFrame(
+        factor_frame_module.FactorFrame()
+    assert not hasattr(factor_frame_module, "_FORMAL_FRAME_TOKEN")
+    assert not hasattr(factor_frame_module, "_FIXTURE_FRAME_TOKEN")
+    with pytest.raises(FactorFrameError, match="FACTOR_FRAME_PARQUET_INVALID"):
+        factor_frame_module._seal_factor_frame(
             table=frame.table,
             manifest=frame.manifest,
-            _canonical_envelope=frame.canonical_envelope,
-            parquet_bytes=frame.parquet_bytes,
-        )
-    with pytest.raises(FactorFrameError, match="FACTOR_FRAME_PARQUET_INVALID"):
-        replace(
-            frame,
+            canonical_envelope=frame.canonical_envelope,
             parquet_bytes=memoryview(frame.parquet_bytes),  # type: ignore[arg-type]
-            _factory_token=factor_frame_module._FIXTURE_FRAME_TOKEN,
+            verified=fixture,
+            as_of=as_of,
         )
     malformed = b"not-parquet"
     with pytest.raises(FactorFrameError, match="FACTOR_FRAME_PARQUET_INVALID"):
-        replace(
-            frame,
+        factor_frame_module._seal_factor_frame(
+            table=frame.table,
             parquet_bytes=malformed,
             manifest=replace(
                 frame.manifest,
                 physical_sha256=hashlib.sha256(malformed).hexdigest(),
             ),
-            _factory_token=factor_frame_module._FIXTURE_FRAME_TOKEN,
+            canonical_envelope=frame.canonical_envelope,
+            verified=fixture,
+            as_of=as_of,
         )
     forged_scope = replace(frame.manifest, certification_scope="full-frequency-certified")
-    with pytest.raises(FactorFrameError, match="FACTOR_FRAME_FIXTURE_SCOPE_ESCALATION"):
-        replace(
-            frame,
+    with pytest.raises(FactorFrameError, match="FACTOR_FRAME_SCOPE_MISMATCH"):
+        factor_frame_module._seal_factor_frame(
+            table=frame.table,
             manifest=forged_scope,
-            _factory_token=factor_frame_module._FIXTURE_FRAME_TOKEN,
+            canonical_envelope=frame.canonical_envelope,
+            parquet_bytes=frame.parquet_bytes,
+            verified=fixture,
+            as_of=as_of,
         )
 
     changed_rows = table.to_pylist()
@@ -260,12 +271,13 @@ def test_factor_frame_factory_scope_and_physical_logical_binding_are_unforgeable
         as_of=AsOfSpec("source_available_at", None),
     )
     with pytest.raises(FactorFrameError, match="FACTOR_FRAME_PHYSICAL_LOGICAL_MISMATCH"):
-        factor_frame_module.FactorFrame(
+        factor_frame_module._seal_factor_frame(
             table=frame.table,
             manifest=other.manifest,
-            _canonical_envelope=other.canonical_envelope,
+            canonical_envelope=other.canonical_envelope,
             parquet_bytes=other.parquet_bytes,
-            _factory_token=factor_frame_module._FIXTURE_FRAME_TOKEN,
+            verified=fixture,
+            as_of=as_of,
         )
 
 
@@ -279,6 +291,13 @@ def test_formal_entry_uses_qdk_loader_and_refuses_arbitrary_table(monkeypatch) -
         return fixture
 
     monkeypatch.setattr(factor_frame_module, "load_verified_curated_bars", verified_loader)
+    built: list[object] = []
+
+    def build(verified, *_args, **_kwargs):
+        built.append(verified)
+        return "formal-result"
+
+    monkeypatch.setattr(factor_frame_module, "_build_factor_frame", build)
     ref = FactorInputRef(
         layer="curated",
         root="frozen-lake",
@@ -294,7 +313,8 @@ def test_formal_entry_uses_qdk_loader_and_refuses_arbitrary_table(monkeypatch) -
         as_of=AsOfSpec("source_available_at", None),
     )
     assert calls == [("frozen-lake", "bars-1m", ZERO_SNAPSHOT)]
-    assert frame.manifest.certification_scope == "full-frequency-certified"
+    assert built == [fixture]
+    assert frame == "formal-result"
     with pytest.raises(FactorFrameError, match="FACTOR_INPUT_REF_REQUIRED"):
         compute_factor_frame(  # type: ignore[arg-type]
             table,
@@ -769,22 +789,30 @@ def test_factor_frame_post_init_cross_checks_envelope_table_and_types(
         [_factor()],
         as_of=AsOfSpec("source_available_at", None),
     )
-    with pytest.raises(FactorFrameError, match="FACTOR_FRAME_FACTORY_REQUIRED"):
-        replace(frame, table="bad")  # type: ignore[arg-type]
+    fixture = factor_frame_module._verified_fixture(table, _fixture_manifest(table))
+    as_of = AsOfSpec("source_available_at", None)
+    with pytest.raises(TypeError, match="dataclass"):
+        replace(frame)
     with pytest.raises(FactorFrameError, match="FACTOR_FRAME_TABLE_INVALID"):
-        replace(
-            frame,
+        factor_frame_module._seal_factor_frame(
             table="bad",  # type: ignore[arg-type]
-            _factory_token=factor_frame_module._FIXTURE_FRAME_TOKEN,
+            manifest=frame.manifest,
+            canonical_envelope=frame.canonical_envelope,
+            parquet_bytes=frame.parquet_bytes,
+            verified=fixture,
+            as_of=as_of,
         )
     envelope = deepcopy(frame.canonical_envelope)
     envelope["metadata"]["v"][0][1]["v"] = ZERO_HASH
     assert frame.canonical_envelope["metadata"]["v"][0][1]["v"] != ZERO_HASH
     with pytest.raises(FactorFrameError, match="FACTOR_FRAME_LOGICAL_BINDING_INVALID"):
-        replace(
-            frame,
-            _canonical_envelope=envelope,
-            _factory_token=factor_frame_module._FIXTURE_FRAME_TOKEN,
+        factor_frame_module._seal_factor_frame(
+            table=frame.table,
+            manifest=frame.manifest,
+            canonical_envelope=envelope,
+            parquet_bytes=frame.parquet_bytes,
+            verified=fixture,
+            as_of=as_of,
         )
     changed = frame.table.set_column(
         frame.table.schema.get_field_index("momentum_1p"),
@@ -794,15 +822,16 @@ def test_factor_frame_post_init_cross_checks_envelope_table_and_types(
     changed_bytes = factor_frame_module._parquet_bytes(changed)
     monkeypatch.setattr(factor_frame_module, "verify_factor_frame_logical_sha256", lambda *_: None)
     with pytest.raises(FactorFrameError, match="FACTOR_FRAME_TABLE_HASH_MISMATCH"):
-        replace(
-            frame,
+        factor_frame_module._seal_factor_frame(
             table=changed,
             parquet_bytes=changed_bytes,
             manifest=replace(
                 frame.manifest,
                 physical_sha256=hashlib.sha256(changed_bytes).hexdigest(),
             ),
-            _factory_token=factor_frame_module._FIXTURE_FRAME_TOKEN,
+            canonical_envelope=frame.canonical_envelope,
+            verified=fixture,
+            as_of=as_of,
         )
 
 
@@ -1022,13 +1051,9 @@ def test_fixture_normalized_sequence_and_non_self_contained_aggregations_fail_cl
 def test_code_version_uses_real_commit_provenance_and_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(factor_frame_module, "_resolve_code_version", REAL_CODE_VERSION_RESOLVER)
     actual_git_root = factor_frame_module._git_root
     actual_git_text = factor_frame_module._git_text
-    monkeypatch.setenv(factor_frame_module.CODE_VERSION_ENV, "invalid")
-    with pytest.raises(FactorFrameError, match="CODE_VERSION_BUILD_COMMIT_INVALID"):
-        factor_frame_module._resolve_code_version()
-
-    monkeypatch.delenv(factor_frame_module.CODE_VERSION_ENV)
     monkeypatch.setattr(factor_frame_module, "_git_root", lambda: Path("repo"))
     monkeypatch.setattr(
         factor_frame_module,

@@ -9,11 +9,11 @@ import re
 import subprocess
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
-from dataclasses import InitVar, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from importlib import metadata
 from numbers import Integral
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 import pandas as pd
 import pyarrow as pa
@@ -52,11 +52,8 @@ from quant_factors.engine_v2 import compute_factor_table
 from quant_factors.pit_v2 import VerifiedAuxiliaryInput, arrow_table_logical_sha256
 
 FACTOR_FRAME_MANIFEST_SCHEMA_ID = "puresaber.factor-frame-manifest@1.0.0"
-CODE_VERSION_ENV = "PURESABER_QUANT_FACTORS_BUILD_COMMIT"
 _ZERO_HASH = "0" * 64
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
-_FORMAL_FRAME_TOKEN = object()
-_FIXTURE_FRAME_TOKEN = object()
 
 
 class FactorFrameError(ValueError):
@@ -92,12 +89,6 @@ def _git_text(root: Path, *arguments: str) -> str:
 
 def _resolve_code_version() -> str:
     """Resolve immutable code provenance; never infer a release tag from package metadata."""
-    build_commit = os.environ.get(CODE_VERSION_ENV)
-    if build_commit is not None:
-        if not _COMMIT.fullmatch(build_commit):
-            raise FactorFrameError("CODE_VERSION_BUILD_COMMIT_INVALID")
-        return f"commit:{build_commit}"
-
     root = _git_root()
     if root is not None:
         commit = _git_text(root, "rev-parse", "HEAD")
@@ -240,14 +231,8 @@ def _build_factor_frame(
     *,
     as_of: AsOfSpec,
     auxiliary_sources: Iterable[VerifiedAuxiliaryInput],
-    factory_token: object,
 ) -> FactorFrame:
-    if factory_token is _FORMAL_FRAME_TOKEN:
-        certification_scope = "full-frequency-certified"
-    elif factory_token is _FIXTURE_FRAME_TOKEN:
-        certification_scope = "fixture-certified"
-    else:
-        raise FactorFrameError("FACTOR_FRAME_FACTORY_REQUIRED")
+    certification_scope = _certification_scope(verified, as_of)
     _validate_frequency_binding(verified, frequency)
     factor_specs = tuple(factors)
     auxiliaries = tuple(auxiliary_sources)
@@ -260,10 +245,9 @@ def _build_factor_frame(
     )
     physical_bytes = _parquet_bytes(output)
     physical_hash = hashlib.sha256(physical_bytes).hexdigest()
-    scope = "research-restated" if as_of.mode == "fixed" else certification_scope
     provisional = FactorFrameManifest(
         schema_id=FACTOR_FRAME_MANIFEST_SCHEMA_ID,
-        certification_scope=scope,
+        certification_scope=certification_scope,
         frequency=frequency,
         factor_specs=factor_specs,
         as_of=as_of,
@@ -281,55 +265,38 @@ def _build_factor_frame(
     manifest = replace(provisional, logical_content_sha256=logical_hash)
     envelope = factor_frame_canonical_envelope(manifest, output)
     verify_factor_frame_logical_sha256(manifest, envelope)
-    return FactorFrame(
+    return _seal_factor_frame(
         table=output,
         manifest=manifest,
-        _canonical_envelope=envelope,
+        canonical_envelope=envelope,
         parquet_bytes=physical_bytes,
-        _factory_token=factory_token,
+        verified=verified,
+        as_of=as_of,
     )
 
 
-@dataclass(frozen=True)
 class FactorFrame:
-    table: pa.Table = field(repr=False)
-    manifest: FactorFrameManifest
-    _canonical_envelope: Mapping[str, Any] = field(repr=False)
-    parquet_bytes: bytes = field(repr=False)
-    _factory_token: InitVar[object | None] = None
+    """Opaque immutable result; only verified formal and fixture entry points can create it."""
 
-    def __post_init__(self, _factory_token: object | None) -> None:
-        if _factory_token not in {_FORMAL_FRAME_TOKEN, _FIXTURE_FRAME_TOKEN}:
-            raise FactorFrameError("FACTOR_FRAME_FACTORY_REQUIRED")
-        allowed_scope = (
-            {"full-frequency-certified", "research-restated"}
-            if _factory_token is _FORMAL_FRAME_TOKEN
-            else {"fixture-certified", "research-restated"}
-        )
-        if self.manifest.certification_scope not in allowed_scope:
-            raise FactorFrameError("FACTOR_FRAME_FIXTURE_SCOPE_ESCALATION")
-        if not isinstance(self.table, pa.Table):
-            raise FactorFrameError("FACTOR_FRAME_TABLE_INVALID")
-        if not isinstance(self.parquet_bytes, bytes):
-            raise FactorFrameError("FACTOR_FRAME_PARQUET_INVALID")
-        if hashlib.sha256(self.parquet_bytes).hexdigest() != self.manifest.physical_sha256:
-            raise FactorFrameError("FACTOR_FRAME_PHYSICAL_HASH_MISMATCH")
-        try:
-            decoded = pq.read_table(pa.BufferReader(self.parquet_bytes)).combine_chunks()
-        except (OSError, pa.ArrowException) as exc:
-            raise FactorFrameError("FACTOR_FRAME_PARQUET_INVALID") from exc
-        expected = self.table.combine_chunks()
-        if decoded.schema != expected.schema or not decoded.equals(expected, check_metadata=True):
-            raise FactorFrameError("FACTOR_FRAME_PHYSICAL_LOGICAL_MISMATCH")
-        try:
-            verify_factor_frame_logical_sha256(self.manifest, self._canonical_envelope)
-        except ContractViolation as exc:
-            raise FactorFrameError("FACTOR_FRAME_LOGICAL_BINDING_INVALID", exc.code) from exc
-        if factor_frame_logical_sha256(self.manifest, self.table) != (
-            self.manifest.logical_content_sha256
-        ):
-            raise FactorFrameError("FACTOR_FRAME_TABLE_HASH_MISMATCH")
-        object.__setattr__(self, "_canonical_envelope", deepcopy(self._canonical_envelope))
+    __slots__ = ("_canonical_envelope", "_manifest", "_parquet_bytes", "_table")
+
+    def __new__(cls, *_args: Any, **_kwargs: Any) -> NoReturn:
+        raise FactorFrameError("FACTOR_FRAME_FACTORY_REQUIRED")
+
+    def __setattr__(self, _name: str, _value: Any) -> None:
+        raise FactorFrameError("FACTOR_FRAME_IMMUTABLE")
+
+    @property
+    def table(self) -> pa.Table:
+        return self._table
+
+    @property
+    def manifest(self) -> FactorFrameManifest:
+        return self._manifest
+
+    @property
+    def parquet_bytes(self) -> bytes:
+        return self._parquet_bytes
 
     @property
     def canonical_envelope(self) -> dict[str, Any]:
@@ -354,6 +321,56 @@ class FactorFrame:
             raise
 
 
+def _certification_scope(verified: Any, as_of: AsOfSpec) -> str:
+    if type(verified) is VerifiedFactorInput:
+        base_scope = "full-frequency-certified"
+    elif type(verified) is _FixtureInput:
+        base_scope = "fixture-certified"
+    else:
+        raise FactorFrameError("FACTOR_VERIFIED_INPUT_REQUIRED")
+    return "research-restated" if as_of.mode == "fixed" else base_scope
+
+
+def _seal_factor_frame(
+    *,
+    table: pa.Table,
+    manifest: FactorFrameManifest,
+    canonical_envelope: Mapping[str, Any],
+    parquet_bytes: bytes,
+    verified: Any,
+    as_of: AsOfSpec,
+) -> FactorFrame:
+    if manifest.certification_scope != _certification_scope(verified, as_of):
+        raise FactorFrameError("FACTOR_FRAME_SCOPE_MISMATCH")
+    if manifest.as_of != as_of:
+        raise FactorFrameError("FACTOR_FRAME_AS_OF_MISMATCH")
+    if not isinstance(table, pa.Table):
+        raise FactorFrameError("FACTOR_FRAME_TABLE_INVALID")
+    if not isinstance(parquet_bytes, bytes):
+        raise FactorFrameError("FACTOR_FRAME_PARQUET_INVALID")
+    if hashlib.sha256(parquet_bytes).hexdigest() != manifest.physical_sha256:
+        raise FactorFrameError("FACTOR_FRAME_PHYSICAL_HASH_MISMATCH")
+    try:
+        decoded = pq.read_table(pa.BufferReader(parquet_bytes)).combine_chunks()
+    except (OSError, pa.ArrowException) as exc:
+        raise FactorFrameError("FACTOR_FRAME_PARQUET_INVALID") from exc
+    expected = table.combine_chunks()
+    if decoded.schema != expected.schema or not decoded.equals(expected, check_metadata=True):
+        raise FactorFrameError("FACTOR_FRAME_PHYSICAL_LOGICAL_MISMATCH")
+    try:
+        verify_factor_frame_logical_sha256(manifest, canonical_envelope)
+    except ContractViolation as exc:
+        raise FactorFrameError("FACTOR_FRAME_LOGICAL_BINDING_INVALID", exc.code) from exc
+    if factor_frame_logical_sha256(manifest, table) != manifest.logical_content_sha256:
+        raise FactorFrameError("FACTOR_FRAME_TABLE_HASH_MISMATCH")
+    frame = object.__new__(FactorFrame)
+    object.__setattr__(frame, "_table", table)
+    object.__setattr__(frame, "_manifest", manifest)
+    object.__setattr__(frame, "_canonical_envelope", deepcopy(canonical_envelope))
+    object.__setattr__(frame, "_parquet_bytes", parquet_bytes)
+    return frame
+
+
 def compute_factor_frame(
     input_ref: FactorInputRef,
     frequency: FrequencySpec,
@@ -372,7 +389,6 @@ def compute_factor_frame(
         factors,
         as_of=as_of,
         auxiliary_sources=auxiliary_sources,
-        factory_token=_FORMAL_FRAME_TOKEN,
     )
 
 
@@ -643,12 +659,10 @@ def compute_factor_frame_from_fixture(
         factors,
         as_of=as_of,
         auxiliary_sources=auxiliary_sources,
-        factory_token=_FIXTURE_FRAME_TOKEN,
     )
 
 
 __all__ = [
-    "CODE_VERSION_ENV",
     "FACTOR_FRAME_MANIFEST_SCHEMA_ID",
     "FactorFrame",
     "FactorFrameError",
