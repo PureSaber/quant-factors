@@ -31,7 +31,7 @@ orjson==3.12.0
     # via quant-data-kit
 packaging==26.3
     # via pytest
-pandas==2.3.2
+pandas==2.3.3
     # via
     #   quant-data-kit
     #   quant-factors (pyproject.toml)
@@ -39,7 +39,7 @@ pluggy==1.6.0
     # via
     #   pytest
     #   pytest-cov
-pyarrow==20.0.0
+pyarrow==25.0.1
     # via
     #   quant-data-kit
     #   quant-factors (pyproject.toml)
