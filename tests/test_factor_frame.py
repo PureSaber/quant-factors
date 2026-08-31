@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import quant_data_kit.research_contracts_v2 as qdk_contracts
 from quant_data_kit import (
     AssetClass,
     EventSchemaRef,
@@ -226,6 +227,8 @@ def test_factor_frame_factory_scope_and_physical_logical_binding_are_unforgeable
         factor_frame_module.FactorFrame()
     assert not hasattr(factor_frame_module, "_FORMAL_FRAME_TOKEN")
     assert not hasattr(factor_frame_module, "_FIXTURE_FRAME_TOKEN")
+    assert not hasattr(qdk_contracts, "_VERIFIED_INPUT_FACTORY_TOKEN")
+    assert not hasattr(qdk_contracts.VerifiedFactorInput, "_from_certified_factory")
     with pytest.raises(FactorFrameError, match="FACTOR_FRAME_PARQUET_INVALID"):
         factor_frame_module._seal_factor_frame(
             table=frame.table,
