@@ -81,5 +81,6 @@ purged = purged_kfold_splits(sample_times, label_end_times, n_splits=5, embargo_
 coverage、`pip check`和跨仓清单校验。若发布验证失败，回滚到上一个默认分支提交及
 对应锁文件；不移动旧tag、不改写历史因子产物，也不降低既有PIT测试门禁。
 
-锁文件使用`pip-compile --extra dev --build-deps-for editable --allow-unsafe --strip-extras`
-生成，禁止在锁之外临时解析构建后端。
+锁文件使用`pip-compile --extra dev --build-deps-for editable --allow-unsafe --strip-extras --constraint requirements-constraints.txt`生成，禁止在锁之外临时解析构建后端。
+`requirements-constraints.txt`只保存Python3.10—3.12共同解析所需的兼容性上界；依赖声明、
+约束和重新生成的锁文件必须作为同一审查单元提交，禁止只手改某个传递依赖版本。
