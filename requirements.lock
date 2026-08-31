@@ -4,26 +4,45 @@
 #
 #    pip-compile --allow-unsafe --build-deps-for=editable --extra=dev --index-url=https://pypi.org/simple --output-file=requirements.lock --strip-extras pyproject.toml
 #
+attrs==26.1.0
+    # via
+    #   jsonschema
+    #   referencing
 colorama==0.4.6
     # via pytest
 coverage==7.16.0
     # via pytest-cov
+duckdb==1.5.5
+    # via quant-data-kit
 iniconfig==2.3.0
     # via pytest
+jsonschema==4.26.0
+    # via quant-data-kit
+jsonschema-rs==0.52.1
+    # via quant-data-kit
+jsonschema-specifications==2025.9.1
+    # via jsonschema
 numpy==2.2.6
     # via
     #   pandas
+    #   quant-data-kit
     #   quant-factors (pyproject.toml)
+orjson==3.12.0
+    # via quant-data-kit
 packaging==26.3
     # via pytest
 pandas==2.3.2
-    # via quant-factors (pyproject.toml)
+    # via
+    #   quant-data-kit
+    #   quant-factors (pyproject.toml)
 pluggy==1.6.0
     # via
     #   pytest
     #   pytest-cov
 pyarrow==20.0.0
-    # via quant-factors (pyproject.toml)
+    # via
+    #   quant-data-kit
+    #   quant-factors (pyproject.toml)
 pygments==2.21.0
     # via pytest
 pytest==9.1.1
@@ -37,13 +56,31 @@ python-dateutil==2.9.0.post0
 pytz==2026.3.post1
     # via pandas
 pyyaml==6.0.3
+    # via
+    #   quant-data-kit
+    #   quant-factors (pyproject.toml)
+quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@v0.8.0
     # via quant-factors (pyproject.toml)
+referencing==0.37.0
+    # via
+    #   jsonschema
+    #   jsonschema-specifications
+rpds-py==2026.6.3
+    # via
+    #   jsonschema
+    #   referencing
 ruff==0.16.5
     # via quant-factors (pyproject.toml)
 six==1.17.0
     # via python-dateutil
+typing-extensions==4.16.0
+    # via
+    #   quant-data-kit
+    #   referencing
 tzdata==2026.3
     # via pandas
+websockets==15.0.1
+    # via quant-data-kit
 
 # The following packages are considered to be unsafe in a requirements file:
 setuptools==84.0.0
