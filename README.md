@@ -20,7 +20,7 @@ quant-factors compute --config configs/example.yaml
 ## M8认证FactorFrame
 
 `compute_factor_frame`是跨资产、全频率认证入口。它不接受调用方直接传入DataFrame或Arrow
-表，只接受`FactorInputRef`，并按layer调用`quant-data-kit v0.8.0`冻结的
+表，只接受`FactorInputRef`，并按layer调用`quant-data-kit v0.8.1`冻结的
 `load_verified_curated_bars`或`load_verified_normalized_events`工厂。频率、年化周期、因子窗口、
 逐行`as_of`和辅助数据快照都必须显式声明。
 
