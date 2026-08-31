@@ -18,6 +18,7 @@ from quant_factors.pit_v2 import (
     PitError,
     VerifiedAuxiliaryInput,
     select_auxiliary_version,
+    validate_auxiliary_inputs,
 )
 
 IDENTITY_COLUMNS = (
@@ -285,7 +286,7 @@ def compute_factor_table(
     missing = sorted(required_columns - set(table.column_names))
     if missing:
         raise FactorComputationError("FACTOR_INPUT_COLUMNS_MISSING", ",".join(missing))
-    auxiliaries = tuple(auxiliary_sources)
+    auxiliaries = validate_auxiliary_inputs(auxiliary_sources)
     histories: dict[tuple[str, str], list[tuple[_DependencyValue, ...]]] = defaultdict(list)
     output: list[dict[str, Any]] = []
     identities: set[tuple[str, int, int, str]] = set()

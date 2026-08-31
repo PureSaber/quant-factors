@@ -215,6 +215,51 @@ class AuxiliarySelection:
     row: Mapping[str, Any]
 
 
+def _role_contract(source: AuxiliarySource) -> tuple[Any, ...]:
+    return (
+        source.schema_id,
+        source.schema_version,
+        source.business_key_columns,
+        source.observation_time_column,
+        source.effective_from_column,
+        source.effective_to_column,
+        source.available_at_column,
+        source.superseded_at_column,
+        source.revision_column,
+        tuple(source.value_availability.items()),
+        source.join_recipe,
+    )
+
+
+def validate_auxiliary_inputs(
+    inputs: Iterable[VerifiedAuxiliaryInput],
+) -> tuple[VerifiedAuxiliaryInput, ...]:
+    """Validate role contracts and version identity across every supplied snapshot."""
+    verified_inputs = tuple(inputs)
+    role_contracts: dict[str, tuple[Any, ...]] = {}
+    identities: dict[tuple[Any, ...], Any] = {}
+    for verified in verified_inputs:
+        if not isinstance(verified, VerifiedAuxiliaryInput):
+            raise PitError("AUX_VERIFIED_INPUT_REQUIRED")
+        spec = verified.source
+        contract = _role_contract(spec)
+        if spec.role in role_contracts and role_contracts[spec.role] != contract:
+            raise PitError("AUX_ROLE_CONTRACT_MISMATCH", spec.role)
+        role_contracts[spec.role] = contract
+        for row in verified.table.to_pylist():
+            business_key = tuple(_freeze(row[name]) for name in spec.business_key_columns)
+            effective_from = _utc_timestamp(row[spec.effective_from_column], "AUX_NAIVE_TIME")
+            revision = _revision(row[spec.revision_column])
+            identity = (spec.role, business_key, effective_from.value, revision)
+            content = _freeze(row)
+            if identity in identities:
+                if identities[identity] == content:
+                    raise PitError("AUX_DUPLICATE_VERSION")
+                raise PitError("AUX_REVISION_CONFLICT")
+            identities[identity] = content
+    return verified_inputs
+
+
 def select_auxiliary_version(
     inputs: Iterable[VerifiedAuxiliaryInput],
     *,

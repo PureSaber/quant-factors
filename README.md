@@ -37,7 +37,10 @@ frame = compute_factor_frame(
 
 冻结测试数据必须使用`compute_factor_frame_from_fixture`，其结果只能标记为
 `fixture-certified`；固定时点重述只能标记为`research-restated`。输出携带完整manifest、
-规范typed-cell envelope、RFC8785逻辑SHA-256和独立Parquet物理SHA-256。
+规范typed-cell envelope、RFC8785逻辑SHA-256和独立Parquet物理SHA-256。认证对象只能由受控
+工厂创建，并会反解Parquet字节与Arrow逻辑表逐字段比对，防止拼接不同运行的物理文件和
+逻辑manifest。`code_version`来自干净Git工作树、VCS安装元数据或发布流水线注入的40位实际
+commit，不预填尚未存在的tag；工作树有未提交修改或无法证明代码来源时拒绝生成认证产物。
 
 外部基本面、FX或参考数据先通过`load_verified_auxiliary_source`从单次读取的Parquet字节
 校验物理hash、Arrow逻辑hash和PIT区间，再参与确定性的双时间选择。
