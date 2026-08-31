@@ -17,12 +17,41 @@ quant-factors list
 quant-factors compute --config configs/example.yaml
 ```
 
+## M8认证FactorFrame
+
+`compute_factor_frame`是跨资产、全频率认证入口。它不接受调用方直接传入DataFrame或Arrow
+表，只接受`FactorInputRef`，并按layer调用`quant-data-kit v0.8.0`冻结的
+`load_verified_curated_bars`或`load_verified_normalized_events`工厂。频率、年化周期、因子窗口、
+逐行`as_of`和辅助数据快照都必须显式声明。
+
+```python
+from quant_factors import AsOfSpec, FactorInputRef, compute_factor_frame
+
+frame = compute_factor_frame(
+    input_ref,
+    frequency,
+    factor_specs,
+    as_of=AsOfSpec("source_available_at", None),
+)
+```
+
+冻结测试数据必须使用`compute_factor_frame_from_fixture`，其结果只能标记为
+`fixture-certified`；固定时点重述只能标记为`research-restated`。输出携带完整manifest、
+规范typed-cell envelope、RFC8785逻辑SHA-256和独立Parquet物理SHA-256。
+
+外部基本面、FX或参考数据先通过`load_verified_auxiliary_source`从单次读取的Parquet字节
+校验物理hash、Arrow逻辑hash和PIT区间，再参与确定性的双时间选择。
+
 ## Factors
 
 - `momentum_20d`
 - `volatility_20d`
 - `mean_reversion_z_20d`
 - `volume_surge_5d`
+
+以上`*_d`名称属于永久保留的`legacy-daily`兼容入口，不能产生M8认证声明。认证因子使用
+`*_p`周期语义，例如`momentum_20p`和`volatility_20p`；`20p`表示同一标的20个已完成period，
+不表示自然日。
 
 ## Research validation
 
