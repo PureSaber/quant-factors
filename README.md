@@ -19,7 +19,11 @@ python -m pip check
 ```bash
 quant-factors list
 quant-factors compute --config configs/example.yaml
+quant-factors validate-expressions --expressions expressions.yaml
+quant-factors screen --config screening.yaml
 ```
+
+自定义研究公式使用受限、因果的表达式语言，并复用内置因子核心。语言、API、增量筛选和中性化对照见[因子研究筛选](docs/research-screening.md)。
 
 ## M8认证FactorFrame
 

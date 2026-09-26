@@ -16,6 +16,12 @@ from quant_factors.contracts_v2 import (
     SourceLineage,
 )
 from quant_factors.core import compute_factors, list_factors
+from quant_factors.expressions import (
+    ExpressionError,
+    compute_research_factors,
+    expression_requirements,
+    validate_expressions,
+)
 from quant_factors.factor_frame import (
     FactorFrame,
     FactorFrameError,
@@ -45,6 +51,7 @@ __all__ = [
     "AsOfSpec",
     "AuxiliarySource",
     "ContractViolation",
+    "ExpressionError",
     "FactorDependency",
     "FactorFrame",
     "FactorFrameError",
@@ -64,8 +71,11 @@ __all__ = [
     "compute_factor_frame",
     "compute_factor_frame_from_fixture",
     "compute_factors",
+    "compute_research_factors",
+    "expression_requirements",
     "list_factors",
     "load_verified_auxiliary_source",
     "purged_kfold_splits",
+    "validate_expressions",
     "walk_forward_splits",
 ]
