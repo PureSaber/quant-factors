@@ -12,7 +12,7 @@ python -m pip check
 
 ## Usage
 
-本开发分支将QDK固定到`4248bfdf4dcf525962e3c19f5f2c5b5fa5222534`，
+本开发分支将QDK固定到`104f1ef8a3b1278c0ea5420fadaa9d1d863ce726`，
 与日线投研工作流使用同一份不可变依赖；依赖声明和锁文件同步更新。
 旧发布标签保持不变。
 
