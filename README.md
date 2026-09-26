@@ -12,14 +12,18 @@ python -m pip check
 
 ## Usage
 
-本开发分支将 QDK 固定到 `8fed47b8f62694c36830dec270cfa21759133f2f`，
+本开发分支将QDK固定到`104f1ef8a3b1278c0ea5420fadaa9d1d863ce726`，
 与日线投研工作流使用同一份不可变依赖；依赖声明和锁文件同步更新。
 旧发布标签保持不变。
 
 ```bash
 quant-factors list
 quant-factors compute --config configs/example.yaml
+quant-factors validate-expressions --expressions expressions.yaml
+quant-factors screen --config screening.yaml
 ```
+
+自定义研究公式使用受限、因果的表达式语言，并复用内置因子核心。语言、API、增量筛选和中性化对照见[因子研究筛选](docs/research-screening.md)。
 
 ## M8认证FactorFrame
 
