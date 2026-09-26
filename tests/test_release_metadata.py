@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-QDK_COMMIT = "104f1ef8a3b1278c0ea5420fadaa9d1d863ce726"
+QDK_COMMIT = "b5621379e1a15562371be31c03f354a6acf512e4"
 
 
 def test_cross_interpreter_constraint_is_applied_to_generated_lock() -> None:

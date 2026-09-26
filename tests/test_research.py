@@ -47,3 +47,45 @@ def test_sparse_cross_section_is_unavailable():
     p = panel().query("symbol == '1'")
     report = factor_report(p, ["momentum_20d"], cutoff="2025-01-01")
     assert all(row["rank_ic"] is None for row in report["ic_decay"])
+
+
+def test_delayed_neutralized_ic_matches_traded_signal_and_uses_prestart_history(monkeypatch):
+    dates = pd.bdate_range("2025-01-01", periods=12)
+    rows = []
+    for symbol, loading in zip("ABCD", [-2, -1, 1, 2]):
+        close = 100.0
+        for index, day in enumerate(dates):
+            signal = loading * (-1) ** index
+            rows.append(
+                {
+                    "date": day,
+                    "symbol": symbol,
+                    "industry": "all",
+                    "close": close,
+                    "momentum_20d": signal,
+                }
+            )
+            close *= 1 + signal * 0.01
+    prices = pd.DataFrame(rows)
+    monkeypatch.setattr("quant_factors.research.compute_research_factors", lambda p, *_: p.copy())
+    raw = factor_report(
+        prices,
+        ["momentum_20d"],
+        horizons=(1,),
+        cutoff="2025-02-01",
+        neutralize_by=("industry",),
+        start=str(dates[2].date()),
+    )
+    lagged = factor_report(
+        prices,
+        ["momentum_20d"],
+        horizons=(1,),
+        cutoff="2025-02-01",
+        neutralize_by=("industry",),
+        signal_delay=1,
+        start=str(dates[2].date()),
+    )
+    assert raw["neutralization"][0]["neutralized_rank_ic"] == pytest.approx(1)
+    assert lagged["neutralization"][0]["neutralized_rank_ic"] == pytest.approx(-1)
+    assert lagged["neutralization"][0]["sessions"] == raw["neutralization"][0]["sessions"]
+    assert lagged["signal_delay"] == 1
