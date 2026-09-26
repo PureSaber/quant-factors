@@ -350,11 +350,13 @@ def expression_requirements(
             return memo[name]
         if name in FACTOR_REGISTRY:
             result = {**_builtin_requirement(name), "dependencies": [name]}
+            result["pit_columns"] = result["columns"] if result["pit_required"] else []
         elif name in RAW_INPUTS:
             result = {
                 "columns": [name],
                 "warmup_bars": 1,
                 "pit_required": name in {"pe_ratio", "pb_ratio"},
+                "pit_columns": [name] if name in {"pe_ratio", "pb_ratio"} else [],
                 "dependencies": [name],
             }
         else:
@@ -364,6 +366,7 @@ def expression_requirements(
                 "columns": sorted({column for part in parts for column in part["columns"]}),
                 "warmup_bars": base_warmup + _temporal_extra(trees[name].body),
                 "pit_required": any(part["pit_required"] for part in parts),
+                "pit_columns": sorted({column for part in parts for column in part["pit_columns"]}),
                 "dependencies": sorted(dependencies[name]),
                 "expression": normalized[name],
             }

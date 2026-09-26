@@ -18,7 +18,11 @@ def factor_requirements(names: list[str]) -> dict[str, dict]:
     """Expose required columns and completed-bar warmup without executing a factor."""
     requirements = expression_requirements(names)
     return {
-        name: {key: value for key, value in requirement.items() if key != "dependencies"}
+        name: {
+            key: value
+            for key, value in requirement.items()
+            if key not in {"dependencies", "pit_columns"}
+        }
         for name, requirement in requirements.items()
     }
 

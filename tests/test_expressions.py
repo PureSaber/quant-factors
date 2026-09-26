@@ -84,6 +84,17 @@ def test_expression_computation_is_causal_and_rank_is_cross_sectional() -> None:
     assert first.loc[first.date == first.date.max(), "ranked"].between(0, 1).all()
 
 
+def test_mixed_expression_tracks_only_financial_pit_columns() -> None:
+    expressions = {
+        "value_momentum": "pe_inv + momentum_20d",
+        "nested": "rolling_mean(value_momentum, 5) + pb_ratio + volume",
+    }
+    requirements = expression_requirements(["nested", "momentum_20d"], expressions)
+    assert requirements["nested"]["columns"] == ["close", "pb_ratio", "pe_ratio", "volume"]
+    assert requirements["nested"]["pit_columns"] == ["pb_ratio", "pe_ratio"]
+    assert requirements["momentum_20d"]["pit_columns"] == []
+
+
 def test_report_supports_custom_incremental_and_neutralized_comparisons() -> None:
     expressions = {"risk_adjusted": "momentum_5d / maximum(volatility_10d, 0.0001)"}
     report = factor_report(
