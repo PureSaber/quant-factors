@@ -115,6 +115,11 @@ def compute_factors(df: pd.DataFrame, factors: list[str] | None = None) -> pd.Da
     """Compute selected factors on an OHLCV panel sorted by date per symbol."""
     _require_cols(df, ("date", "symbol", "close"))
     factors = factors or list(FACTOR_REGISTRY)
+    unknown = set(factors) - set(FACTOR_REGISTRY)
+    if unknown:
+        raise ValueError(f"Unknown factors: {sorted(unknown)}")
+    if df.duplicated(["date", "symbol"]).any():
+        raise ValueError("Factors require unique symbol/date rows")
     out = df.copy()
     if "volume" not in out.columns:
         out["volume"] = np.nan
@@ -130,8 +135,6 @@ def compute_factors(df: pd.DataFrame, factors: list[str] | None = None) -> pd.Da
         pb = g["pb_ratio"] if "pb_ratio" in g.columns else None
 
         for name in factors:
-            if name not in _FACTOR_COMPUTERS:
-                continue
             if name in REQUIRES_FUNDAMENTAL:
                 col = "pe_ratio" if name == "pe_inv" else "pb_ratio"
                 if col not in g.columns:
@@ -139,7 +142,11 @@ def compute_factors(df: pd.DataFrame, factors: list[str] | None = None) -> pd.Da
                     continue
             g[name] = _FACTOR_COMPUTERS[name](close, volume, high, low, pe, pb)
         pieces.append(g)
-    return pd.concat(pieces, ignore_index=True)
+    return (
+        pd.concat(pieces, ignore_index=True)
+        if pieces
+        else out.assign(**{n: np.nan for n in factors})
+    )
 
 
 def list_factors() -> dict[str, str]:

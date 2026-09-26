@@ -99,7 +99,9 @@ def test_core_governance_edges_and_fundamental_contract() -> None:
     result = compute_factors(data, factors=list(list_factors()))
     assert {"pe_inv", "pb_inv", "amihud_illiq_20d"}.issubset(result.columns)
     no_volume = data.drop(columns=["volume", "pe_ratio", "pb_ratio"])
-    result = compute_factors(no_volume, factors=["volume_surge_5d", "pe_inv", "pb_inv", "unknown"])
+    result = compute_factors(no_volume, factors=["volume_surge_5d", "pe_inv", "pb_inv"])
+    with pytest.raises(ValueError, match="Unknown"):
+        compute_factors(no_volume, factors=["unknown"])
     assert result["pe_inv"].isna().all() and result["pb_inv"].isna().all()
     assert factor_requires_fundamental("pe_inv")
     assert not factor_requires_fundamental("momentum_20d")
