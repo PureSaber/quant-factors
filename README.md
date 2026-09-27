@@ -1,5 +1,7 @@
 # quant-factors
 
+研究可信度升级：接口、使用示例、验收及限制见 [11–20 使用说明](docs/RESEARCH_INTEGRITY_11_20.md)。
+
 Shared factor computation library for PureSaber quant research.
 
 ## Install
@@ -12,7 +14,7 @@ python -m pip check
 
 ## Usage
 
-本开发分支将QDK固定到`271a65ee383158b3dd7570e19a3f2b4123f09f79`，
+本开发分支将QDK固定到`ba136c2fa2eea121bfb2ad7887b536c3952586f7`，
 并保留日线 PIT 风险分支的因子证据改进。跨仓开发请使用配套本地工作区；
 最终依赖提交与锁文件须在验收后同步更新。
 旧发布标签保持不变。

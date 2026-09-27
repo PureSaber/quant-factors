@@ -49,6 +49,8 @@ def factor_report(
     baseline_names: tuple[str, ...] = (),
     neutralize_by: tuple[str, ...] = (),
     signal_delay: int = 0,
+    terminal_labels: pd.DataFrame | None = None,
+    sessions=None,
 ) -> dict:
     """Coverage, IC decay, redundancy, yearly and optional industry/regime evidence.
 
@@ -82,11 +84,63 @@ def factor_report(
             if transformed is not None:
                 transformed[names] = transformed.groupby("date")[names].rank(pct=True)
                 transformed[names] = transformed.groupby("symbol")[names].shift(signal_delay)
+    from quant_data_kit.financial.labels import forward_labels
+
+    grid = (
+        pd.DatetimeIndex(sorted(panel.date.unique()))
+        if sessions is None
+        else pd.DatetimeIndex(sessions)
+    )
+    selected = panel[["date", "symbol"]].rename(columns={"symbol": "instrument_id"})
+    selected["sample_id"] = (
+        selected.instrument_id.astype(str) + ":" + selected.date.dt.strftime("%Y-%m-%d")
+    )
+    levels = selected[["date", "instrument_id"]].copy()
+    levels["value"] = panel.get("return_close", panel.close)
+    levels["available_at"] = (
+        pd.to_datetime(panel.available_at, utc=True)
+        if "available_at" in panel
+        else panel.date.dt.tz_localize("UTC") + pd.Timedelta(hours=23, minutes=59)
+    )
+    levels = levels.loc[np.isfinite(levels.value) & levels.value.gt(0)]
+    label_records = []
     for horizon in horizons:
-        panel[f"return_{horizon}"] = panel.groupby("symbol").close.transform(
-            lambda x, h=horizon: x.shift(-h) / x - 1
+        terminal = None
+        if terminal_labels is not None:
+            if "horizon" not in terminal_labels:
+                raise ValueError("terminal label evidence must declare its horizon")
+            terminal = terminal_labels.loc[terminal_labels.horizon.eq(horizon)].drop(
+                columns="horizon"
+            )
+            terminal = terminal.loc[terminal.sample_id.isin(selected.sample_id)]
+        labels = forward_labels(
+            levels,
+            selected,
+            grid,
+            horizon=horizon,
+            as_of=cutoff_date.tz_localize("UTC"),
+            terminals=terminal,
         )
-        panel[f"end_{horizon}"] = panel.groupby("symbol").date.shift(-horizon)
+        panel[f"return_{horizon}"] = labels["return"].to_numpy(dtype=float)
+        panel[f"end_{horizon}"] = pd.to_datetime(labels.label_end).to_numpy()
+        for row in labels.to_dict("records"):
+            if (
+                start
+                and row["date"] < pd.Timestamp(start)
+                or end
+                and row["date"] > pd.Timestamp(end)
+            ):
+                continue
+            label_records.append(
+                {
+                    "sample_id": row["sample_id"],
+                    "date": str(row["date"].date()),
+                    "symbol": row["instrument_id"],
+                    "horizon": horizon,
+                    "status": row["status"],
+                    "return": None if pd.isna(row["return"]) else row["return"],
+                }
+            )
     if start:
         panel = panel[panel.date >= pd.Timestamp(start)]
     if end:
@@ -237,6 +291,19 @@ def factor_report(
         "cutoff": str(cutoff_date.date()),
         "requirements": requirements,
         "coverage": coverage,
+        "label_samples": label_records,
+        "label_coverage": [
+            {
+                "horizon": h,
+                "selected_samples": sum(r["horizon"] == h for r in label_records),
+                "status_counts": pd.Series(
+                    [r["status"] for r in label_records if r["horizon"] == h]
+                )
+                .value_counts()
+                .to_dict(),
+            }
+            for h in horizons
+        ],
         "ic_decay": evidence,
         "segments": segments,
         "correlations": redundancy,
