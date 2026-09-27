@@ -106,9 +106,7 @@ def test_financial_v2_requirements_reach_nested_research_expressions() -> None:
     assert "amount" in requirements["amihud_illiq_20d_v2"]["columns"]
     assert "volume" not in requirements["amihud_illiq_20d_v2"]["columns"]
     assert requirements["average_volume_20d"]["columns"] == ["volume"]
-    frame = panel().assign(
-        free_float_shares=100000, volume_unit="shares", share_basis="raw"
-    )
+    frame = panel().assign(free_float_shares=100000, volume_unit="shares", share_basis="raw")
     result = compute_research_factors(frame, ["float_signal"], expressions)
     assert result.float_signal.notna().any()
 
