@@ -48,6 +48,7 @@ def factor_report(
     end: str | None = None,
     baseline_names: tuple[str, ...] = (),
     neutralize_by: tuple[str, ...] = (),
+    signal_delay: int = 0,
 ) -> dict:
     """Coverage, IC decay, redundancy, yearly and optional industry/regime evidence.
 
@@ -56,6 +57,8 @@ def factor_report(
     reported as unavailable instead of zero correlation.
     """
     requirements = expression_requirements(names, expressions)
+    if type(signal_delay) is not int or signal_delay < 0:
+        raise ValueError("signal_delay must be a non-negative integer")
     if baseline_names:
         expression_requirements(list(baseline_names), expressions)
         if set(baseline_names) - set(names):
@@ -67,6 +70,18 @@ def factor_report(
     cutoff_date = pd.Timestamp(cutoff)
     panel = panel[panel.date < cutoff_date].copy()
     panel = compute_research_factors(panel, names, expressions).sort_values(["symbol", "date"])
+    neutralized = (
+        neutralize_cross_section(panel, cols=names, by=list(neutralize_by))
+        if neutralize_by
+        else None
+    )
+    if signal_delay:
+        # Execution delays per-date percentile ranks, after neutralization.
+        # Lag the same representation before cutting the evaluation interval.
+        for transformed in (panel, neutralized):
+            if transformed is not None:
+                transformed[names] = transformed.groupby("date")[names].rank(pct=True)
+                transformed[names] = transformed.groupby("symbol")[names].shift(signal_delay)
     for horizon in horizons:
         panel[f"return_{horizon}"] = panel.groupby("symbol").close.transform(
             lambda x, h=horizon: x.shift(-h) / x - 1
@@ -184,7 +199,7 @@ def factor_report(
 
     neutralization = []
     if neutralize_by:
-        neutralized = neutralize_cross_section(panel, cols=names, by=list(neutralize_by))
+        neutralized = neutralized.loc[panel.index]
         applied = [name for name in neutralize_by if name in panel.columns]
         for name in names:
             for horizon in horizons:
@@ -215,6 +230,10 @@ def factor_report(
     return {
         "schema_version": "quant.factor-research/v1",
         "scope": "descriptive-retrospective",
+        "signal_delay": signal_delay,
+        "signal_representation": "lagged-cross-sectional-percentile-rank"
+        if signal_delay
+        else "factor-value",
         "cutoff": str(cutoff_date.date()),
         "requirements": requirements,
         "coverage": coverage,

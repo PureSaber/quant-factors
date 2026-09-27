@@ -301,7 +301,20 @@ def _builtin_requirement(name: str) -> dict:
         (int(token[:-1]) for token in tokens if token.endswith("d") and token[:-1].isdigit()), 0
     )
     columns = ["close"]
-    if name.startswith(("volume_", "turnover_")):
+    if name == "turnover_rate_20d_v2":
+        return {
+            "columns": ["volume", "free_float_shares", "volume_unit", "share_basis"],
+            "warmup_bars": 20,
+            "pit_required": True,
+            "pit_columns": ["free_float_shares"],
+        }
+    if name == "amihud_illiq_20d_v2":
+        return {
+            "columns": ["return_close", "amount", "amount_unit", "currency"],
+            "warmup_bars": 21,
+            "pit_required": False,
+        }
+    if name.startswith(("volume_", "turnover_", "average_volume_")):
         columns = ["volume"]
     elif name.startswith("amihud_"):
         columns = ["close", "volume"]
@@ -350,7 +363,7 @@ def expression_requirements(
             return memo[name]
         if name in FACTOR_REGISTRY:
             result = {**_builtin_requirement(name), "dependencies": [name]}
-            result["pit_columns"] = result["columns"] if result["pit_required"] else []
+            result.setdefault("pit_columns", result["columns"] if result["pit_required"] else [])
         elif name in RAW_INPUTS:
             result = {
                 "columns": [name],

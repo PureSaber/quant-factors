@@ -95,6 +95,22 @@ def test_mixed_expression_tracks_only_financial_pit_columns() -> None:
     assert requirements["momentum_20d"]["pit_columns"] == []
 
 
+def test_financial_v2_requirements_reach_nested_research_expressions() -> None:
+    expressions = {"float_signal": "rolling_mean(turnover_rate_20d_v2, 3)"}
+    requirements = expression_requirements(
+        ["float_signal", "amihud_illiq_20d_v2", "average_volume_20d"], expressions
+    )
+    assert requirements["float_signal"]["pit_columns"] == ["free_float_shares"]
+    assert requirements["float_signal"]["warmup_bars"] == 22
+    assert requirements["float_signal"]["pit_required"] is True
+    assert "amount" in requirements["amihud_illiq_20d_v2"]["columns"]
+    assert "volume" not in requirements["amihud_illiq_20d_v2"]["columns"]
+    assert requirements["average_volume_20d"]["columns"] == ["volume"]
+    frame = panel().assign(free_float_shares=100000, volume_unit="shares", share_basis="raw")
+    result = compute_research_factors(frame, ["float_signal"], expressions)
+    assert result.float_signal.notna().any()
+
+
 def test_report_supports_custom_incremental_and_neutralized_comparisons() -> None:
     expressions = {"risk_adjusted": "momentum_5d / maximum(volatility_10d, 0.0001)"}
     report = factor_report(
