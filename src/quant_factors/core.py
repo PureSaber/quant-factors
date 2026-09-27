@@ -23,6 +23,16 @@ FACTOR_REGISTRY: dict[str, str] = {
     "pb_inv": "Inverse P/B (requires pb_ratio)",
 }
 
+# Preserve historical default experiments. New semantics require opt-in names.
+DEFAULT_FACTORS = tuple(FACTOR_REGISTRY)
+FACTOR_REGISTRY.update(
+    {
+        "average_volume_20d": "20-day average share volume (legacy turnover_20d alias)",
+        "turnover_rate_20d_v2": "20-day mean daily raw shares / PIT raw free-float shares",
+        "amihud_illiq_20d_v2": "20-day absolute economic return / actual traded amount",
+    }
+)
+
 REQUIRES_FUNDAMENTAL = frozenset({"pe_inv", "pb_inv"})
 
 
@@ -67,8 +77,45 @@ def volume_surge(volume: pd.Series, short: int = 5, long: int = 20) -> pd.Series
     return short_ma / long_ma.replace(0, np.nan)
 
 
-def turnover(volume: pd.Series, window: int = 20) -> pd.Series:
+def average_volume(volume: pd.Series, window: int = 20) -> pd.Series:
     return volume.rolling(window).mean()
+
+
+def turnover(volume: pd.Series, window: int = 20) -> pd.Series:
+    """Legacy average-volume alias; NOT a turnover rate. Kept for old experiments."""
+    return average_volume(volume, window)
+
+
+def turnover_rate(volume: pd.Series, free_float_shares: pd.Series, window=20) -> pd.Series:
+    """Both series must use the same raw share unit and historical float vintage."""
+    if not volume.index.equals(free_float_shares.index):
+        raise ValueError("volume and free float indices must match")
+    if (
+        (volume.dropna() < 0).any()
+        or (free_float_shares.dropna() <= 0).any()
+        or not np.isfinite(volume.dropna()).all()
+        or not np.isfinite(free_float_shares.dropna()).all()
+    ):
+        raise ValueError("finite nonnegative volume and positive float required")
+    return (volume / free_float_shares).rolling(window).mean()
+
+
+def amihud_amount(return_close: pd.Series, amount: pd.Series, window=20) -> pd.Series:
+    """Amount is actual local-currency turnover, not adjusted close times raw volume."""
+    if not return_close.index.equals(amount.index):
+        raise ValueError("return prices and amount indices must match")
+    if (
+        (return_close.dropna() <= 0).any()
+        or (amount.dropna() < 0).any()
+        or not np.isfinite(return_close.dropna()).all()
+        or not np.isfinite(amount.dropna()).all()
+    ):
+        raise ValueError("finite positive prices and nonnegative amount required")
+    return (
+        (return_close.pct_change(fill_method=None).abs() / amount.replace(0, np.nan))
+        .rolling(window)
+        .mean()
+    )
 
 
 def amihud_illiq(close: pd.Series, volume: pd.Series, window: int = 20) -> pd.Series:
@@ -114,7 +161,7 @@ _FACTOR_COMPUTERS: dict[str, callable] = {
 def compute_factors(df: pd.DataFrame, factors: list[str] | None = None) -> pd.DataFrame:
     """Compute selected factors on an OHLCV panel sorted by date per symbol."""
     _require_cols(df, ("date", "symbol", "close"))
-    factors = factors or list(FACTOR_REGISTRY)
+    factors = factors or list(DEFAULT_FACTORS)
     unknown = set(factors) - set(FACTOR_REGISTRY)
     if unknown:
         raise ValueError(f"Unknown factors: {sorted(unknown)}")
@@ -135,6 +182,21 @@ def compute_factors(df: pd.DataFrame, factors: list[str] | None = None) -> pd.Da
         pb = g["pb_ratio"] if "pb_ratio" in g.columns else None
 
         for name in factors:
+            if name == "average_volume_20d":
+                g[name] = average_volume(volume)
+                continue
+            if name == "turnover_rate_20d_v2":
+                _require_cols(g, ("free_float_shares", "volume_unit", "share_basis"))
+                if not g.volume_unit.eq("shares").all() or not g.share_basis.eq("raw").all():
+                    raise ValueError("turnover v2 requires explicit raw share units")
+                g[name] = turnover_rate(volume, g.free_float_shares)
+                continue
+            if name == "amihud_illiq_20d_v2":
+                _require_cols(g, ("return_close", "amount", "amount_unit", "currency"))
+                if not g.amount_unit.eq("currency").all() or g.currency.nunique() != 1:
+                    raise ValueError("Amihud v2 requires one currency and actual currency amounts")
+                g[name] = amihud_amount(g.return_close, g.amount)
+                continue
             if name in REQUIRES_FUNDAMENTAL:
                 col = "pe_ratio" if name == "pe_inv" else "pb_ratio"
                 if col not in g.columns:

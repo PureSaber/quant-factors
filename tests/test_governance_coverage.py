@@ -96,6 +96,16 @@ def test_cli_direct_entrypoints_and_parquet_paths(tmp_path: Path, capsys) -> Non
 
 def test_core_governance_edges_and_fundamental_contract() -> None:
     data = _panel()
+    # The v2 liquidity factors deliberately require explicit financial inputs.
+    data = data.assign(
+        free_float_shares=10000.0,
+        volume_unit="shares",
+        share_basis="raw",
+        amount=data.close * data.volume,
+        amount_unit="currency",
+        currency="CNY",
+        return_close=data.close,
+    )
     result = compute_factors(data, factors=list(list_factors()))
     assert {"pe_inv", "pb_inv", "amihud_illiq_20d"}.issubset(result.columns)
     no_volume = data.drop(columns=["volume", "pe_ratio", "pb_ratio"])
