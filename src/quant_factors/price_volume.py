@@ -13,9 +13,7 @@ import re
 import numpy as np
 import pandas as pd
 
-_TOKEN = re.compile(
-    r"(\d+\.\d+|\d+|[A-Z][A-Z0-9_]*|>=|<=|==|[+\-*/^(),?:<>=&|])"
-)
+_TOKEN = re.compile(r"(\d+\.\d+|\d+|[A-Z][A-Z0-9_]*|>=|<=|==|[+\-*/^(),?:<>=&|])")
 _FIELDS = frozenset({"OPEN", "HIGH", "LOW", "CLOSE", "VOLUME", "AMOUNT", "VWAP"})
 _DERIVED = frozenset({"RET", "DTM", "DBM", "TR", "HD", "LD", "SELF"})
 _CALLS = frozenset(
@@ -87,7 +85,7 @@ def _tokenize(formula: str) -> list[str]:
     while index < len(formula):
         match = _TOKEN.match(formula, index)
         if match is None:
-            raise FormulaError(f"Cannot read formula at: {formula[index:index + 12]}")
+            raise FormulaError(f"Cannot read formula at: {formula[index : index + 12]}")
         tokens.append(match.group(1))
         index = match.end()
     return tokens
@@ -436,7 +434,9 @@ def _sma(panel: _Panel, values: pd.Series, length: int, weight: int) -> pd.Serie
     return panel.grouped(values).apply(smooth).reset_index(level=0, drop=True).reindex(values.index)
 
 
-def _regression(panel: _Panel, left: pd.Series, right: pd.Series | None, window: int, *, residual: bool):
+def _regression(
+    panel: _Panel, left: pd.Series, right: pd.Series | None, window: int, *, residual: bool
+):
     def slope(window_y: np.ndarray, window_x: np.ndarray) -> float:
         if not np.isfinite(window_y).all() or not np.isfinite(window_x).all():
             return np.nan
@@ -496,8 +496,10 @@ class _Evaluator:
 
     def _bin(self, op: str, left, right):
         if op in {"&", "|"}:
-            combined = self._bool(left).__and__(self._bool(right)) if op == "&" else self._bool(left).__or__(
-                self._bool(right)
+            combined = (
+                self._bool(left).__and__(self._bool(right))
+                if op == "&"
+                else self._bool(left).__or__(self._bool(right))
             )
             return combined
         if op in {">", "<", ">=", "<=", "=="}:
