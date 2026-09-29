@@ -10,11 +10,13 @@ converted.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from numpy.lib.stride_tricks import sliding_window_view
 
 Compute = Callable[[pd.DataFrame], pd.Series]
 
@@ -118,8 +120,11 @@ def _reversal_20d(frame: pd.DataFrame) -> pd.Series:
 SHELL_QUANTILE = 0.30
 SHELL_MIN_NAMES = 10
 BETA_WINDOW = 252
+BETA_EW_HALF_LIFE = 63
 MOMENTUM_SKIP = 21
 MOMENTUM_LOOKBACK = 252
+LONG_REVERSAL_LOOKBACK = 504
+EARNINGS_VARIABILITY_WINDOW = 1260
 
 
 def _positive_market_cap(frame: pd.DataFrame) -> pd.Series:
@@ -217,8 +222,8 @@ def _momentum_252_21(frame: pd.DataFrame) -> pd.Series:
     return close.shift(MOMENTUM_SKIP) / close.shift(MOMENTUM_LOOKBACK) - 1.0
 
 
-def _liquidity_log_turnover(frame: pd.DataFrame) -> pd.Series:
-    """Log of the 20-session mean raw share turnover. Non-positive means stay missing."""
+def _liquidity_log_turnover(frame: pd.DataFrame, window: int = 20) -> pd.Series:
+    """Log of the mean raw share turnover. Non-positive means stay missing."""
     if not frame["volume_unit"].eq("shares").all() or not frame["share_basis"].eq("raw").all():
         raise ValueError("liquidity_log_turnover_20d requires raw share units")
     volume = _numeric(frame["volume"])
@@ -232,10 +237,169 @@ def _liquidity_log_turnover(frame: pd.DataFrame) -> pd.Series:
         raise ValueError(
             "liquidity_log_turnover_20d requires finite nonnegative volume and positive float"
         )
-    rate = (volume / shares).rolling(20).mean()
+    rate = (volume / shares).rolling(window).mean()
     with np.errstate(invalid="ignore", divide="ignore"):
         logged = np.log(rate.where(rate > 0).to_numpy(dtype=float))
     return pd.Series(logged, index=frame.index)
+
+
+def _liquidity_log_turnover_60(frame: pd.DataFrame) -> pd.Series:
+    return _liquidity_log_turnover(frame, 60)
+
+
+def _liquidity_log_turnover_240(frame: pd.DataFrame) -> pd.Series:
+    return _liquidity_log_turnover(frame, 240)
+
+
+def _ew_beta(frame: pd.DataFrame) -> pd.Series:
+    """252-session beta with a 63-session half-life. The half-life is an independent default."""
+    stock = frame["close"] / frame["close"].shift(1) - 1.0
+    market = _numeric(frame["market_return"])
+    out = np.full(len(frame), np.nan)
+    if len(frame) < BETA_WINDOW:
+        return pd.Series(out, index=frame.index)
+    decay = math.exp(-math.log(2.0) / BETA_EW_HALF_LIFE)
+    weights = decay ** np.arange(BETA_WINDOW - 1, -1, -1, dtype=float)
+    weights = weights / float(weights.sum())
+    stock_windows = sliding_window_view(stock.to_numpy(dtype=float), BETA_WINDOW)
+    market_windows = sliding_window_view(market.to_numpy(dtype=float), BETA_WINDOW)
+    complete = np.isfinite(stock_windows).all(axis=1) & np.isfinite(market_windows).all(axis=1)
+    stock_centered = stock_windows - (stock_windows @ weights)[:, None]
+    market_centered = market_windows - (market_windows @ weights)[:, None]
+    variance = market_centered**2 @ weights
+    covariance = (stock_centered * market_centered) @ weights
+    usable = complete & (variance > 0)
+    beta = np.divide(covariance, variance, out=np.full(len(variance), np.nan), where=usable)
+    out[BETA_WINDOW - 1 :] = beta
+    return pd.Series(out, index=frame.index)
+
+
+def _short_reversal_21(frame: pd.DataFrame) -> pd.Series:
+    """Minus the 21-session return, so the exposure is short-horizon reversal."""
+    close = frame["close"]
+    return -(close / close.shift(MOMENTUM_SKIP) - 1.0)
+
+
+def _long_reversal(frame: pd.DataFrame) -> pd.Series:
+    """Minus the second-year return, from 504 to 252 sessions ago.
+
+    The window ends where the 252-session momentum window starts, so the two do not overlap.
+    """
+    close = frame["close"]
+    return -(close.shift(BETA_WINDOW) / close.shift(LONG_REVERSAL_LOOKBACK) - 1.0)
+
+
+def _seasonality_lag_year(frame: pd.DataFrame) -> pd.Series:
+    """Return of the 21 sessions that began one year ago: the coming month, last year."""
+    close = frame["close"]
+    return close.shift(BETA_WINDOW - MOMENTUM_SKIP) / close.shift(BETA_WINDOW) - 1.0
+
+
+def _dividend_yield(frame: pd.DataFrame) -> pd.Series:
+    """Non-negative trailing cash dividend over positive market cap."""
+    dividend = _numeric(frame["cash_dividend_ttm"])
+    cap = _positive_market_cap(frame)
+    valid = (
+        np.isfinite(dividend.to_numpy()) & np.isfinite(cap.to_numpy()) & (dividend.to_numpy() >= 0)
+    )
+    out = _empty(frame.index)
+    if valid.any():
+        out.iloc[np.flatnonzero(valid)] = dividend.to_numpy()[valid] / cap.to_numpy()[valid]
+    return out
+
+
+def _cash_earnings_yield(frame: pd.DataFrame) -> pd.Series:
+    """Trailing operating cash flow over market cap. Negative cash flow stays negative."""
+    return _ratio(frame["operating_cashflow_ttm"], frame["market_cap"], positive_denominator=True)
+
+
+def _market_leverage(frame: pd.DataFrame) -> pd.Series:
+    """(market cap + non-negative debt) / market cap."""
+    cap = _positive_market_cap(frame)
+    debt = _numeric(frame["total_debt"])
+    valid = np.isfinite(cap.to_numpy()) & np.isfinite(debt.to_numpy()) & (debt.to_numpy() >= 0)
+    out = _empty(frame.index)
+    if valid.any():
+        out.iloc[np.flatnonzero(valid)] = (
+            cap.to_numpy()[valid] + debt.to_numpy()[valid]
+        ) / cap.to_numpy()[valid]
+    return out
+
+
+def _debt_to_assets(frame: pd.DataFrame) -> pd.Series:
+    """Non-negative debt over positive total assets."""
+    debt = _numeric(frame["total_debt"])
+    assets = _numeric(frame["total_assets"])
+    valid = (
+        np.isfinite(debt.to_numpy())
+        & np.isfinite(assets.to_numpy())
+        & (debt.to_numpy() >= 0)
+        & (assets.to_numpy() > 0)
+    )
+    out = _empty(frame.index)
+    if valid.any():
+        out.iloc[np.flatnonzero(valid)] = debt.to_numpy()[valid] / assets.to_numpy()[valid]
+    return out
+
+
+def _sales_growth(frame: pd.DataFrame) -> pd.Series:
+    """TTM revenue over supplied prior positive revenue, minus one."""
+    current = _numeric(frame["revenue_ttm"])
+    prior = _numeric(frame["revenue_ttm_prior_year"])
+    valid = np.isfinite(current.to_numpy()) & np.isfinite(prior.to_numpy()) & (prior.to_numpy() > 0)
+    out = _empty(frame.index)
+    if valid.any():
+        out.iloc[np.flatnonzero(valid)] = current.to_numpy()[valid] / prior.to_numpy()[valid] - 1.0
+    return out.replace([np.inf, -np.inf], np.nan)
+
+
+def _earnings_variability(frame: pd.DataFrame) -> pd.Series:
+    """Standard deviation of trailing earnings over its absolute mean, across 1260 sessions.
+
+    Price does not enter, so a moving share price with flat earnings scores zero.
+    """
+    earnings = _numeric(frame["net_profit_parent_ttm"])
+    rolling = earnings.rolling(EARNINGS_VARIABILITY_WINDOW, min_periods=EARNINGS_VARIABILITY_WINDOW)
+    scale = rolling.mean().abs()
+    return (rolling.std(ddof=1) / scale.where(scale > 0)).replace([np.inf, -np.inf], np.nan)
+
+
+def _passthrough(frame: pd.DataFrame, column: str) -> pd.Series:
+    values = _numeric(frame[column])
+    return values.where(np.isfinite(values.to_numpy()))
+
+
+def _analyst_revision(frame: pd.DataFrame) -> pd.Series:
+    """Caller-supplied analyst revision. This module does not estimate sentiment."""
+    return _passthrough(frame, "analyst_revision")
+
+
+def _forward_earnings_yield(frame: pd.DataFrame) -> pd.Series:
+    """Caller-supplied forward earnings over market cap. Missing forecasts stay missing."""
+    return _ratio(frame["forward_net_profit"], frame["market_cap"], positive_denominator=True)
+
+
+def _expected_growth(frame: pd.DataFrame) -> pd.Series:
+    """Caller-supplied expected growth. This module does not invent a forecast."""
+    return _passthrough(frame, "expected_growth")
+
+
+def _industry_momentum_20d(frame: pd.DataFrame) -> pd.Series:
+    """Leave-one-out equal-weight 20-session industry return. A one-name industry stays missing."""
+    ordered = frame.sort_values(["symbol", "date"])
+    returns = ordered.groupby("symbol", sort=False)["close"].pct_change(20)
+    work = ordered.assign(_industry_return=returns.to_numpy())
+    out = _empty(frame.index)
+    for _, day in work.groupby("date", sort=False):
+        for _, peers in day.groupby("industry", sort=False):
+            values = peers["_industry_return"]
+            finite = values[np.isfinite(values.to_numpy(dtype=float))]
+            if len(finite) < 2:
+                continue
+            total = float(finite.sum())
+            count = len(finite)
+            out.loc[finite.index] = (total - finite.to_numpy(dtype=float)) / (count - 1)
+    return out
 
 
 def _book_to_price(frame: pd.DataFrame) -> pd.Series:
@@ -480,6 +644,188 @@ def _specs() -> dict[str, AcademicSpec]:
                 warmup_bars=1,
                 requires_statement_currency=True,
                 compute=_book_leverage,
+            ),
+            AcademicSpec(
+                name="liquidity_log_turnover_60d",
+                summary="Risk exposure: log of 60-session mean raw share turnover",
+                role="risk_exposure",
+                data_columns=("volume", "free_float_shares", "volume_unit", "share_basis"),
+                pit_columns=("free_float_shares",),
+                warmup_bars=60,
+                requires_statement_currency=False,
+                compute=_liquidity_log_turnover_60,
+            ),
+            AcademicSpec(
+                name="liquidity_log_turnover_240d",
+                summary="Risk exposure: log of 240-session mean raw share turnover",
+                role="risk_exposure",
+                data_columns=("volume", "free_float_shares", "volume_unit", "share_basis"),
+                pit_columns=("free_float_shares",),
+                warmup_bars=240,
+                requires_statement_currency=False,
+                compute=_liquidity_log_turnover_240,
+            ),
+            AcademicSpec(
+                name="beta_ew_252d",
+                summary=(
+                    "Risk exposure: 252-session beta with an independent 63-session half-life; "
+                    "not an MSCI descriptor"
+                ),
+                role="risk_exposure",
+                data_columns=("close", "market_return"),
+                pit_columns=(),
+                warmup_bars=BETA_WINDOW + 1,
+                requires_statement_currency=False,
+                compute=_ew_beta,
+                single_market_return=True,
+            ),
+            AcademicSpec(
+                name="short_term_reversal_21d",
+                summary="Risk exposure: minus the 21-session return",
+                role="risk_exposure",
+                data_columns=("close",),
+                pit_columns=(),
+                warmup_bars=MOMENTUM_SKIP + 1,
+                requires_statement_currency=False,
+                compute=_short_reversal_21,
+            ),
+            AcademicSpec(
+                name="long_term_reversal_504_252",
+                summary=(
+                    "Risk exposure: minus the return from 504 to 252 sessions ago; "
+                    "does not overlap momentum_252_21"
+                ),
+                role="risk_exposure",
+                data_columns=("close",),
+                pit_columns=(),
+                warmup_bars=LONG_REVERSAL_LOOKBACK + 1,
+                requires_statement_currency=False,
+                compute=_long_reversal,
+            ),
+            AcademicSpec(
+                name="seasonality_21d_lag_252",
+                summary=(
+                    "Risk exposure: return of the 21 sessions that began 252 sessions ago, "
+                    "the coming month last year"
+                ),
+                role="risk_exposure",
+                data_columns=("close",),
+                pit_columns=(),
+                warmup_bars=BETA_WINDOW + 1,
+                requires_statement_currency=False,
+                compute=_seasonality_lag_year,
+            ),
+            AcademicSpec(
+                name="dividend_yield_ttm",
+                summary="Risk exposure: non-negative trailing cash dividend / market cap",
+                role="risk_exposure",
+                data_columns=("cash_dividend_ttm", "market_cap"),
+                pit_columns=("cash_dividend_ttm",),
+                warmup_bars=1,
+                requires_statement_currency=True,
+                compute=_dividend_yield,
+                currency_when_present=True,
+            ),
+            AcademicSpec(
+                name="cash_earnings_yield_ttm",
+                summary=(
+                    "Risk exposure: trailing operating cash flow / market cap; "
+                    "negative cash flow stays negative"
+                ),
+                role="risk_exposure",
+                data_columns=("operating_cashflow_ttm", "market_cap"),
+                pit_columns=("operating_cashflow_ttm",),
+                warmup_bars=1,
+                requires_statement_currency=True,
+                compute=_cash_earnings_yield,
+            ),
+            AcademicSpec(
+                name="market_leverage",
+                summary="Risk exposure: (market cap + non-negative debt) / market cap",
+                role="risk_exposure",
+                data_columns=("market_cap", "total_debt"),
+                pit_columns=("total_debt",),
+                warmup_bars=1,
+                requires_statement_currency=True,
+                compute=_market_leverage,
+                currency_when_present=True,
+            ),
+            AcademicSpec(
+                name="debt_to_assets",
+                summary="Risk exposure: non-negative debt / positive total assets",
+                role="risk_exposure",
+                data_columns=("total_debt", "total_assets"),
+                pit_columns=("total_debt", "total_assets"),
+                warmup_bars=1,
+                requires_statement_currency=True,
+                compute=_debt_to_assets,
+            ),
+            AcademicSpec(
+                name="sales_growth_yoy",
+                summary="Risk exposure: TTM revenue / prior positive revenue - 1",
+                role="risk_exposure",
+                data_columns=("revenue_ttm", "revenue_ttm_prior_year"),
+                pit_columns=("revenue_ttm", "revenue_ttm_prior_year"),
+                warmup_bars=1,
+                requires_statement_currency=True,
+                compute=_sales_growth,
+            ),
+            AcademicSpec(
+                name="earnings_variability_1260d",
+                summary=(
+                    "Risk exposure: std / |mean| of trailing earnings over 1260 sessions; "
+                    "price does not enter"
+                ),
+                role="risk_exposure",
+                data_columns=("net_profit_parent_ttm",),
+                pit_columns=("net_profit_parent_ttm",),
+                warmup_bars=EARNINGS_VARIABILITY_WINDOW,
+                requires_statement_currency=True,
+                compute=_earnings_variability,
+            ),
+            AcademicSpec(
+                name="analyst_revision",
+                summary="Risk exposure: caller-supplied analyst revision; not estimated here",
+                role="risk_exposure",
+                data_columns=("analyst_revision",),
+                pit_columns=("analyst_revision",),
+                warmup_bars=1,
+                requires_statement_currency=False,
+                compute=_analyst_revision,
+            ),
+            AcademicSpec(
+                name="forward_earnings_yield",
+                summary="Risk exposure: caller-supplied forward earnings / market cap",
+                role="risk_exposure",
+                data_columns=("forward_net_profit", "market_cap"),
+                pit_columns=("forward_net_profit",),
+                warmup_bars=1,
+                requires_statement_currency=True,
+                compute=_forward_earnings_yield,
+            ),
+            AcademicSpec(
+                name="expected_growth",
+                summary="Risk exposure: caller-supplied expected growth; not estimated here",
+                role="risk_exposure",
+                data_columns=("expected_growth",),
+                pit_columns=("expected_growth",),
+                warmup_bars=1,
+                requires_statement_currency=False,
+                compute=_expected_growth,
+            ),
+            AcademicSpec(
+                name="industry_momentum_20d",
+                summary=(
+                    "Risk exposure: leave-one-out 20-session industry return; "
+                    "not an MSCI industry momentum factor"
+                ),
+                role="risk_exposure",
+                data_columns=("close", "industry"),
+                pit_columns=(),
+                warmup_bars=21,
+                requires_statement_currency=False,
+                compute=_industry_momentum_20d,
+                scope="cross_section",
             ),
         )
     }
