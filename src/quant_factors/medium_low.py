@@ -165,7 +165,7 @@ def _up_down_vol_ratio(frame: pd.DataFrame, horizon: int) -> pd.Series:
 
 def _amihud(frame: pd.DataFrame, horizon: int) -> pd.Series:
     def compute(group: pd.DataFrame) -> pd.Series:
-        traded = (group["close"] * group["volume"]).replace(0, np.nan)
+        traded = (group["close"] * group["volume"]).where(lambda value: value > 0)
         return (
             _returns(group["close"]).abs().div(traded).rolling(horizon, min_periods=horizon).mean()
         )

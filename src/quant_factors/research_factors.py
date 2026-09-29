@@ -265,7 +265,7 @@ def _max_return_60(frame: pd.DataFrame) -> pd.Series:
 
 def _amihud_120(frame: pd.DataFrame) -> pd.Series:
     def illiquidity(group: pd.DataFrame) -> pd.Series:
-        traded = (group["close"] * group["volume"]).replace(0, np.nan)
+        traded = (group["close"] * group["volume"]).where(lambda value: value > 0)
         return group["close"].pct_change().abs().div(traded).rolling(120, min_periods=120).mean()
 
     return _per_symbol(frame, illiquidity)
