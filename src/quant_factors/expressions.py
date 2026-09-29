@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 
 from quant_factors.core import FACTOR_REGISTRY, compute_factors
+from quant_factors.price_volume import FormulaError, price_volume_requirements
+from quant_factors.price_volume_catalog import PRICE_VOLUME_CATALOG
 
 MAX_EXPRESSIONS = 32
 MAX_EXPRESSION_LENGTH = 500
@@ -358,7 +360,7 @@ def expression_requirements(
         requested
     ):
         raise ExpressionError("Factor names must be unique strings")
-    unknown = set(requested) - set(FACTOR_REGISTRY) - set(normalized)
+    unknown = set(requested) - set(FACTOR_REGISTRY) - set(normalized) - set(PRICE_VOLUME_CATALOG)
     if unknown:
         raise ExpressionError(f"Unknown factors: {sorted(unknown)}")
     memo: dict[str, dict] = {}
@@ -369,6 +371,8 @@ def expression_requirements(
         if name in FACTOR_REGISTRY:
             result = {**_builtin_requirement(name), "dependencies": [name]}
             result.setdefault("pit_columns", result["columns"] if result["pit_required"] else [])
+        elif name in PRICE_VOLUME_CATALOG:
+            result = price_volume_requirements(name)
         elif name in RAW_INPUTS:
             result = {
                 "columns": [name],
@@ -511,6 +515,7 @@ def compute_research_factors(
         }
         | (set(requested) & set(FACTOR_REGISTRY))
     )
+    price_volume_needed = [name for name in requested if name in PRICE_VOLUME_CATALOG]
     direct_inputs = {
         dependency
         for name in custom_needed
@@ -522,10 +527,19 @@ def compute_research_factors(
         # The existing built-in core always requires close and treats missing volume,
         # P/E and P/B as optional all-missing inputs.
         required_columns.add("close")
+    for name in price_volume_needed:
+        required_columns.update(PRICE_VOLUME_CATALOG[name]["columns"])
     missing = sorted(required_columns - set(frame.columns))
     if missing:
         raise ExpressionError(f"Missing columns: {missing}")
     result = compute_factors(frame, builtin_needed) if builtin_needed else frame.copy()
+    if price_volume_needed:
+        from quant_factors.price_volume import compute_price_volume_factors
+
+        try:
+            result = compute_price_volume_factors(result, price_volume_needed)
+        except FormulaError as exc:
+            raise ExpressionError(str(exc)) from exc
     result = result.sort_values(["symbol", "date"], kind="stable").reset_index(drop=True)
     context: dict[str, object] = {
         name: result[name]

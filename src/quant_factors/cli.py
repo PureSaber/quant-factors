@@ -11,6 +11,7 @@ import yaml
 from quant_factors.core import list_factors
 from quant_factors.expressions import compute_research_factors, validate_expressions
 from quant_factors.neutralize import neutralize_cross_section
+from quant_factors.price_volume import list_price_volume_factors
 from quant_factors.research import factor_report
 
 
@@ -28,6 +29,9 @@ def cmd_list(args: argparse.Namespace) -> int:
     else:
         for name, desc in factors.items():
             print(f"{name:24} {desc}")
+        print()
+        for name, desc in list_price_volume_factors().items():
+            print(f"{name:48} {desc}")
     return 0
 
 
