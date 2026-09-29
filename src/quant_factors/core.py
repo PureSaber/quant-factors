@@ -3,6 +3,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from quant_factors.academic import (
+    ACADEMIC_REGISTRY,
+    academic_is_fundamental,
+    academic_scope,
+    apply_cross_section,
+    assert_academic_contracts,
+    compute_symbol_academic,
+)
+
 FACTOR_REGISTRY: dict[str, str] = {
     "momentum_5d": "5-day close return",
     "momentum_10d": "10-day close return",
@@ -32,6 +41,7 @@ FACTOR_REGISTRY.update(
         "amihud_illiq_20d_v2": "20-day absolute economic return / actual traded amount",
     }
 )
+FACTOR_REGISTRY.update(ACADEMIC_REGISTRY)
 
 REQUIRES_FUNDAMENTAL = frozenset({"pe_inv", "pb_inv"})
 
@@ -168,6 +178,7 @@ def compute_factors(df: pd.DataFrame, factors: list[str] | None = None) -> pd.Da
     if df.duplicated(["date", "symbol"]).any():
         raise ValueError("Factors require unique symbol/date rows")
     out = df.copy()
+    assert_academic_contracts(out, [name for name in factors if name in ACADEMIC_REGISTRY])
     if "volume" not in out.columns:
         out["volume"] = np.nan
 
@@ -182,6 +193,12 @@ def compute_factors(df: pd.DataFrame, factors: list[str] | None = None) -> pd.Da
         pb = g["pb_ratio"] if "pb_ratio" in g.columns else None
 
         for name in factors:
+            scope = academic_scope(name)
+            if scope == "cross_section":
+                continue
+            if scope == "symbol":
+                g[name] = compute_symbol_academic(name, g)
+                continue
             if name == "average_volume_20d":
                 g[name] = average_volume(volume)
                 continue
@@ -204,11 +221,15 @@ def compute_factors(df: pd.DataFrame, factors: list[str] | None = None) -> pd.Da
                     continue
             g[name] = _FACTOR_COMPUTERS[name](close, volume, high, low, pe, pb)
         pieces.append(g)
-    return (
+    result = (
         pd.concat(pieces, ignore_index=True)
         if pieces
-        else out.assign(**{n: np.nan for n in factors})
+        else out.assign(**{name: np.nan for name in factors})
     )
+    cross_section = [name for name in factors if academic_scope(name) == "cross_section"]
+    if cross_section:
+        result = apply_cross_section(result, cross_section)
+    return result
 
 
 def list_factors() -> dict[str, str]:
@@ -216,4 +237,4 @@ def list_factors() -> dict[str, str]:
 
 
 def factor_requires_fundamental(name: str) -> bool:
-    return name in REQUIRES_FUNDAMENTAL
+    return name in REQUIRES_FUNDAMENTAL or academic_is_fundamental(name)

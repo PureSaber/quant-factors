@@ -298,6 +298,11 @@ def validate_expressions(mapping: Mapping[str, str] | None) -> dict[str, str]:
 
 
 def _builtin_requirement(name: str) -> dict:
+    from quant_factors.academic import academic_requirement
+
+    academic = academic_requirement(name)
+    if academic is not None:
+        return academic
     tokens = name.split("_")
     window = next(
         (int(token[:-1]) for token in tokens if token.endswith("d") and token[:-1].isdigit()), 0
