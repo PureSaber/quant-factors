@@ -161,7 +161,6 @@ def test_turnover_fundamentals_and_positioning() -> None:
         [
             "turnover_rate_vol_20d",
             "accruals_to_assets",
-            "gross_profitability",
             "operating_profitability",
             "asset_growth",
             "earnings_surprise",
@@ -170,7 +169,6 @@ def test_turnover_fundamentals_and_positioning() -> None:
     )
     assert result["turnover_rate_vol_20d"].iloc[-1] == pytest.approx(0.0)
     assert result["accruals_to_assets"].iloc[-1] == pytest.approx(0.06)
-    assert result["gross_profitability"].iloc[-1] == pytest.approx(18 / 12)
     assert result["operating_profitability"].iloc[-1] == pytest.approx((30 - 12 - 3 - 1) / 20)
     assert result["asset_growth"].iloc[-1] == pytest.approx(0.2)
     assert result["asset_growth"].iloc[1] != result["asset_growth"].iloc[1]
@@ -226,7 +224,6 @@ def test_medium_and_low_frequency_factors() -> None:
             "financial_leverage",
             "gross_margin",
             "roe",
-            "book_to_price",
             "same_month_return",
         ],
     )
@@ -239,7 +236,6 @@ def test_medium_and_low_frequency_factors() -> None:
     assert result["financial_leverage"].iloc[-1] == pytest.approx(0.6)
     assert result["gross_margin"].iloc[-1] == pytest.approx(8 / 12)
     assert result["roe"].iloc[-1] == pytest.approx(0.75)
-    assert result["book_to_price"].iloc[-1] == pytest.approx(0.2)
     market = np.linspace(0.001, 0.02, rows)
     market[0] = np.nan
     prices = [100.0]
@@ -248,10 +244,7 @@ def test_medium_and_low_frequency_factors() -> None:
     matched = frame.copy()
     matched["close"] = prices
     matched["market_return"] = market
-    residual = research.compute_named_research_factors(
-        matched, ["beta_252d", "residual_momentum_12_1"]
-    )
-    assert residual["beta_252d"].iloc[-1] == pytest.approx(1.0, abs=1e-8)
+    residual = research.compute_named_research_factors(matched, ["residual_momentum_12_1"])
     assert residual["residual_momentum_12_1"].iloc[-1] == pytest.approx(0.0, abs=1e-6)
     assert result["same_month_return"].iloc[273] == pytest.approx(close[21] / close[0] - 1)
     lows = frame.copy()

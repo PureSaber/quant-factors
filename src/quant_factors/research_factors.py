@@ -200,14 +200,6 @@ def _accruals(frame: pd.DataFrame) -> pd.Series:
     )
 
 
-def _gross_profitability(frame: pd.DataFrame) -> pd.Series:
-    required = ("revenue", "cogs", "total_assets")
-    missing = [column for column in required if column not in frame.columns]
-    if missing:
-        raise ResearchFactorError(f"Missing columns: {missing}")
-    return _ratio(frame["revenue"] - frame["cogs"], frame["total_assets"])
-
-
 def _operating_profitability(frame: pd.DataFrame) -> pd.Series:
     required = ("revenue", "cogs", "sga", "interest_expense", "book_equity")
     missing = [column for column in required if column not in frame.columns]
@@ -291,30 +283,6 @@ def _same_month_return(frame: pd.DataFrame) -> pd.Series:
         return stacked.mean(axis=1, skipna=True).where(stacked.notna().any(axis=1))
 
     return _per_symbol(frame, seasonal)
-
-
-def _beta_252(frame: pd.DataFrame) -> pd.Series:
-    def beta(group: pd.DataFrame) -> np.ndarray:
-        if "market_return" not in group.columns:
-            raise ResearchFactorError("Missing columns: ['market_return']")
-        returns = group["close"].pct_change().to_numpy(dtype=float)
-        market = group["market_return"].to_numpy(dtype=float)
-        values = np.full(len(group), np.nan)
-        window = 252
-        for end in range(window - 1, len(group)):
-            start = end - window + 1
-            yy = returns[start : end + 1]
-            xx = market[start : end + 1]
-            if not np.isfinite(yy).all() or not np.isfinite(xx).all():
-                continue
-            centered_x = xx - xx.mean()
-            variance = float(np.dot(centered_x, centered_x))
-            if variance == 0:
-                continue
-            values[end] = float(np.dot(centered_x, yy - yy.mean()) / variance)
-        return values
-
-    return _per_symbol(frame, beta)
 
 
 def _residual_momentum_12_1(frame: pd.DataFrame) -> pd.Series:
@@ -402,14 +370,6 @@ def _roe(frame: pd.DataFrame) -> pd.Series:
     return _ratio(frame["net_income"], frame["book_equity"])
 
 
-def _book_to_price(frame: pd.DataFrame) -> pd.Series:
-    required = ("book_equity", "market_cap")
-    missing = [column for column in required if column not in frame.columns]
-    if missing:
-        raise ResearchFactorError(f"Missing columns: {missing}")
-    return _ratio(frame["book_equity"], frame["market_cap"])
-
-
 def _consensus_revision(frame: pd.DataFrame) -> pd.Series:
     required = ("consensus_eps", "close")
     missing = [column for column in required if column not in frame.columns]
@@ -456,7 +416,6 @@ _COMPUTERS = {
     "residual_return_21d": _residual_return,
     "overnight_afternoon_spread_20d": _overnight_afternoon,
     "accruals_to_assets": _accruals,
-    "gross_profitability": _gross_profitability,
     "operating_profitability": _operating_profitability,
     "asset_growth": _asset_growth,
     "momentum_6_1": lambda frame: _lagged_price_return(frame, span=126, skip=21),
@@ -468,7 +427,6 @@ _COMPUTERS = {
     "max_return_60d": _max_return_60,
     "amihud_illiq_120d": _amihud_120,
     "same_month_return": _same_month_return,
-    "beta_252d": _beta_252,
     "residual_momentum_12_1": _residual_momentum_12_1,
     "turnover_rate_120d": lambda frame: _turnover_mean(frame, 120),
     "turnover_rate_252d": lambda frame: _turnover_mean(frame, 252),
@@ -478,7 +436,6 @@ _COMPUTERS = {
     "financial_leverage": _financial_leverage,
     "gross_margin": _gross_margin,
     "roe": _roe,
-    "book_to_price": _book_to_price,
     "consensus_revision_60d": _consensus_revision,
     "earnings_surprise": _earnings_surprise,
     "northbound_hold_change_5d": _northbound_change,
@@ -576,13 +533,6 @@ RESEARCH_FACTORS: dict[str, dict] = {
         "pit_required": True,
         "pit_columns": ["net_income", "operating_cash_flow", "average_assets"],
     },
-    "gross_profitability": {
-        "description": "(revenue minus cost of goods) divided by total assets",
-        "columns": ["revenue", "cogs", "total_assets"],
-        "warmup_bars": 1,
-        "pit_required": True,
-        "pit_columns": ["revenue", "cogs", "total_assets"],
-    },
     "operating_profitability": {
         "description": "operating profit after interest divided by book equity",
         "columns": ["revenue", "cogs", "sga", "interest_expense", "book_equity"],
@@ -660,13 +610,6 @@ RESEARCH_FACTORS: dict[str, dict] = {
         "pit_required": False,
         "pit_columns": [],
     },
-    "beta_252d": {
-        "description": "252-session regression beta on supplied market_return",
-        "columns": ["close", "market_return"],
-        "warmup_bars": 252,
-        "pit_required": True,
-        "pit_columns": ["market_return"],
-    },
     "residual_momentum_12_1": {
         "description": "sum of market-model residuals from 252 sessions ago through 21 sessions ago",
         "columns": ["close", "market_return"],
@@ -729,13 +672,6 @@ RESEARCH_FACTORS: dict[str, dict] = {
         "warmup_bars": 1,
         "pit_required": True,
         "pit_columns": ["book_equity", "net_income"],
-    },
-    "book_to_price": {
-        "description": "book equity divided by supplied market capitalization",
-        "columns": ["book_equity", "market_cap"],
-        "warmup_bars": 1,
-        "pit_required": True,
-        "pit_columns": ["book_equity", "market_cap"],
     },
     "consensus_revision_60d": {
         "description": "60-session change in consensus EPS divided by close",
