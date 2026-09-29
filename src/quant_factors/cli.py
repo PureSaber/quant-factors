@@ -10,9 +10,12 @@ import yaml
 
 from quant_factors.core import list_factors
 from quant_factors.expressions import compute_research_factors, validate_expressions
+from quant_factors.fundamental_characteristics import list_fundamental_characteristics
+from quant_factors.medium_low import list_medium_low_factors
 from quant_factors.neutralize import neutralize_cross_section
 from quant_factors.price_volume import list_price_volume_factors
 from quant_factors.research import factor_report
+from quant_factors.research_factors import MINUTE_FACTORS, list_named_research_factors
 
 
 def _load_mapping(path: str | Path) -> dict:
@@ -31,6 +34,17 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"{name:24} {desc}")
         print()
         for name, desc in list_price_volume_factors().items():
+            print(f"{name:48} {desc}")
+        print()
+        for name, desc in list_named_research_factors().items():
+            print(f"{name:48} {desc}")
+        print()
+        for name, desc in list_medium_low_factors().items():
+            print(f"{name:48} {desc}")
+        print()
+        for name, desc in list_fundamental_characteristics().items():
+            print(f"{name:48} {desc}")
+        for name, desc in MINUTE_FACTORS.items():
             print(f"{name:48} {desc}")
     return 0
 

@@ -16,8 +16,20 @@ import numpy as np
 import pandas as pd
 
 from quant_factors.core import FACTOR_REGISTRY, compute_factors
+from quant_factors.fundamental_characteristics import (
+    FUNDAMENTAL_CHARACTERISTICS,
+    FundamentalError,
+    fundamental_requirements,
+)
+from quant_factors.medium_low import MEDIUM_LOW_FACTORS, MediumLowError, medium_low_requirements
 from quant_factors.price_volume import FormulaError, price_volume_requirements
 from quant_factors.price_volume_catalog import PRICE_VOLUME_CATALOG
+from quant_factors.research_factors import (
+    MINUTE_FACTORS,
+    RESEARCH_FACTORS,
+    ResearchFactorError,
+    research_factor_requirements,
+)
 
 MAX_EXPRESSIONS = 32
 MAX_EXPRESSION_LENGTH = 500
@@ -360,7 +372,18 @@ def expression_requirements(
         requested
     ):
         raise ExpressionError("Factor names must be unique strings")
-    unknown = set(requested) - set(FACTOR_REGISTRY) - set(normalized) - set(PRICE_VOLUME_CATALOG)
+    unknown = (
+        set(requested)
+        - set(FACTOR_REGISTRY)
+        - set(normalized)
+        - set(PRICE_VOLUME_CATALOG)
+        - set(RESEARCH_FACTORS)
+        - set(MEDIUM_LOW_FACTORS)
+        - set(FUNDAMENTAL_CHARACTERISTICS)
+    )
+    minute = sorted(unknown & set(MINUTE_FACTORS))
+    if minute:
+        raise ExpressionError(f"Minute factors require compute_minute_factors: {minute}")
     if unknown:
         raise ExpressionError(f"Unknown factors: {sorted(unknown)}")
     memo: dict[str, dict] = {}
@@ -373,6 +396,12 @@ def expression_requirements(
             result.setdefault("pit_columns", result["columns"] if result["pit_required"] else [])
         elif name in PRICE_VOLUME_CATALOG:
             result = price_volume_requirements(name)
+        elif name in RESEARCH_FACTORS:
+            result = research_factor_requirements(name)
+        elif name in MEDIUM_LOW_FACTORS:
+            result = medium_low_requirements(name)
+        elif name in FUNDAMENTAL_CHARACTERISTICS:
+            result = fundamental_requirements(name)
         elif name in RAW_INPUTS:
             result = {
                 "columns": [name],
@@ -516,6 +545,9 @@ def compute_research_factors(
         | (set(requested) & set(FACTOR_REGISTRY))
     )
     price_volume_needed = [name for name in requested if name in PRICE_VOLUME_CATALOG]
+    research_needed = [name for name in requested if name in RESEARCH_FACTORS]
+    medium_low_needed = [name for name in requested if name in MEDIUM_LOW_FACTORS]
+    fundamental_needed = [name for name in requested if name in FUNDAMENTAL_CHARACTERISTICS]
     direct_inputs = {
         dependency
         for name in custom_needed
@@ -529,6 +561,12 @@ def compute_research_factors(
         required_columns.add("close")
     for name in price_volume_needed:
         required_columns.update(PRICE_VOLUME_CATALOG[name]["columns"])
+    for name in research_needed:
+        required_columns.update(RESEARCH_FACTORS[name]["columns"])
+    for name in medium_low_needed:
+        required_columns.update(MEDIUM_LOW_FACTORS[name]["columns"])
+    for name in fundamental_needed:
+        required_columns.update(FUNDAMENTAL_CHARACTERISTICS[name]["columns"])
     missing = sorted(required_columns - set(frame.columns))
     if missing:
         raise ExpressionError(f"Missing columns: {missing}")
@@ -539,6 +577,27 @@ def compute_research_factors(
         try:
             result = compute_price_volume_factors(result, price_volume_needed)
         except FormulaError as exc:
+            raise ExpressionError(str(exc)) from exc
+    if research_needed:
+        from quant_factors.research_factors import compute_named_research_factors
+
+        try:
+            result = compute_named_research_factors(result, research_needed)
+        except ResearchFactorError as exc:
+            raise ExpressionError(str(exc)) from exc
+    if medium_low_needed:
+        from quant_factors.medium_low import compute_medium_low_factors
+
+        try:
+            result = compute_medium_low_factors(result, medium_low_needed)
+        except MediumLowError as exc:
+            raise ExpressionError(str(exc)) from exc
+    if fundamental_needed:
+        from quant_factors.fundamental_characteristics import compute_fundamental_characteristics
+
+        try:
+            result = compute_fundamental_characteristics(result, fundamental_needed)
+        except FundamentalError as exc:
             raise ExpressionError(str(exc)) from exc
     result = result.sort_values(["symbol", "date"], kind="stable").reset_index(drop=True)
     context: dict[str, object] = {
