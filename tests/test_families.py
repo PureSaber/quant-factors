@@ -77,6 +77,8 @@ def test_named_examples_follow_quant_definitions() -> None:
         "net_debt_issuance_to_assets": ("leverage", "financing"),
         "close_5d": ("reversal", "technical"),
         "close_100d": ("momentum", "technical"),
+        "close_location_change": ("technical",),
+        "close_mean_absolute_deviation": ("volatility", "technical"),
         "overnight_return": ("reversal", "sentiment", "technical"),
         "intraday_wick_leverage": ("volatility", "technical"),
         "volume_volatility": ("volatility", "liquidity", "technical"),

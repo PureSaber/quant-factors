@@ -608,7 +608,8 @@ def _price_volume_families(name: str) -> tuple[str, ...]:
         tags.add("reversal")
     elif _is_price_trend(name):
         window = _window(name)
-        tags.add("momentum" if window is not None and window >= 60 else "reversal")
+        if window is not None:
+            tags.add("momentum" if window >= 60 else "reversal")
     return _ordered(tags)
 
 
