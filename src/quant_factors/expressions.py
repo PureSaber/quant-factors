@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from quant_factors.core import FACTOR_REGISTRY, compute_factors
+from quant_factors.families import FAMILY_DEFINITIONS, factor_families
 from quant_factors.fundamental_characteristics import (
     FUNDAMENTAL_CHARACTERISTICS,
     FundamentalError,
@@ -413,6 +414,7 @@ def expression_requirements(
         else:
             parts = [resolve(dependency) for dependency in dependencies[name]]
             base_warmup = max((part["warmup_bars"] for part in parts), default=1)
+            inherited = {family for part in parts for family in part.get("families", ())}
             result = {
                 "columns": sorted({column for part in parts for column in part["columns"]}),
                 "warmup_bars": base_warmup + _temporal_extra(trees[name].body),
@@ -420,7 +422,10 @@ def expression_requirements(
                 "pit_columns": sorted({column for part in parts for column in part["pit_columns"]}),
                 "dependencies": sorted(dependencies[name]),
                 "expression": normalized[name],
+                "families": [family for family in FAMILY_DEFINITIONS if family in inherited],
             }
+        if "expression" not in result and name not in RAW_INPUTS:
+            result["families"] = list(factor_families(name))
         memo[name] = result
         return result
 

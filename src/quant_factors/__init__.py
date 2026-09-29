@@ -28,6 +28,7 @@ from quant_factors.factor_frame import (
     compute_factor_frame,
     compute_factor_frame_from_fixture,
 )
+from quant_factors.families import FAMILY_DEFINITIONS, factor_families
 from quant_factors.pit_v2 import (
     PitError,
     VerifiedAuxiliaryInput,
@@ -48,6 +49,7 @@ from quant_factors.validation import (
 )
 
 __all__ = [
+    "FAMILY_DEFINITIONS",
     "AsOfSpec",
     "AuxiliarySource",
     "ContractViolation",
@@ -73,6 +75,7 @@ __all__ = [
     "compute_factors",
     "compute_research_factors",
     "expression_requirements",
+    "factor_families",
     "list_factors",
     "load_verified_auxiliary_source",
     "purged_kfold_splits",

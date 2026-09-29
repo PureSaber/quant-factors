@@ -10,6 +10,7 @@ import yaml
 
 from quant_factors.core import list_factors
 from quant_factors.expressions import compute_research_factors, validate_expressions
+from quant_factors.families import factor_families
 from quant_factors.fundamental_characteristics import list_fundamental_characteristics
 from quant_factors.medium_low import list_medium_low_factors
 from quant_factors.neutralize import neutralize_cross_section
@@ -25,27 +26,32 @@ def _load_mapping(path: str | Path) -> dict:
     return value
 
 
+def _print_factor(name: str, description: str, width: int) -> None:
+    labels = ",".join(factor_families(name))
+    print(f"{name:{width}} [{labels}] {description}")
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     factors = list_factors()
     if args.json:
         print(json.dumps(factors, indent=2, ensure_ascii=False))
     else:
         for name, desc in factors.items():
-            print(f"{name:24} {desc}")
+            _print_factor(name, desc, 24)
         print()
         for name, desc in list_price_volume_factors().items():
-            print(f"{name:48} {desc}")
+            _print_factor(name, desc, 48)
         print()
         for name, desc in list_named_research_factors().items():
-            print(f"{name:48} {desc}")
+            _print_factor(name, desc, 48)
         print()
         for name, desc in list_medium_low_factors().items():
-            print(f"{name:48} {desc}")
+            _print_factor(name, desc, 48)
         print()
         for name, desc in list_fundamental_characteristics().items():
-            print(f"{name:48} {desc}")
+            _print_factor(name, desc, 48)
         for name, desc in MINUTE_FACTORS.items():
-            print(f"{name:48} {desc}")
+            _print_factor(name, desc, 48)
     return 0
 
 
