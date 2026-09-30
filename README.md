@@ -83,6 +83,11 @@ purged = purged_kfold_splits(sample_times, label_end_times, n_splits=5, embargo_
 
 ## 契约治理与依赖锁定
 
+Windows 的 QDK 数据湖路径包含多级哈希目录。系统未开启长路径时，请使用绝对扩展路径
+（例如 `\\?\F:\quant-data`，网络共享使用 `\\?\UNC\server\share\quant-data`）
+作为数据根目录；仅缩短 pytest 临时根目录仍可能超过 260 字符。测试在 Windows 自动使用
+扩展临时路径，CI 同时运行 Windows 全套测试和原有 Linux 三版本门禁。
+
 本仓库属于`strategy`层，声明消费`standard/v2@2.0.0`。治理元数据位于
 `pyproject.toml`的`[tool.quant-workspace]`，由全栈清单校验；因子输出必须保留
 时间来源和可用时间，PIT审计、walk-forward、purged和embargo验证不能被绕过。
