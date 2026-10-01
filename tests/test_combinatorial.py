@@ -35,7 +35,10 @@ def test_factor_report_preserves_delisted_sample_and_evidenced_zero(monkeypatch)
         ]
     )
     monkeypatch.setattr("quant_factors.research.compute_research_factors", lambda p, *_: p)
-    monkeypatch.setattr("quant_factors.research.expression_requirements", lambda *_: {})
+    monkeypatch.setattr(
+        "quant_factors.research.expression_requirements",
+        lambda *_: {"signal": {"warmup_bars": 1}},
+    )
     terminal = pd.DataFrame(
         [
             {

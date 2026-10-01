@@ -13,6 +13,155 @@ from quant_factors.expressions import (
 )
 from quant_factors.neutralize import neutralize_cross_section
 
+_SOURCE_ORDER = "__quant_factor_source_order"
+_EOD_UTC = pd.Timedelta(hours=23, minutes=59)
+
+
+def _session_dates(values, *, name: str) -> pd.DatetimeIndex:
+    dates = pd.DatetimeIndex(pd.to_datetime(values))
+    if dates.tz is not None:
+        raise ValueError(f"{name} must contain timezone-naive session dates")
+    if not dates.equals(dates.normalize()):
+        raise ValueError(f"{name} must contain normalized session dates")
+    if dates.has_duplicates or not dates.is_monotonic_increasing:
+        raise ValueError(f"{name} must contain unique ordered session dates")
+    return dates
+
+
+def _dense_inputs(
+    original: pd.DataFrame,
+    symbols: pd.Index,
+    sessions: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    keys = pd.MultiIndex.from_product([symbols, sessions], names=["symbol", "date"]).to_frame(
+        index=False
+    )
+    return (
+        keys.merge(original, on=["symbol", "date"], how="left", validate="one_to_one")
+        .sort_values(["symbol", "date"])
+        .reset_index(drop=True)
+    )
+
+
+def _mask_incomplete_windows(
+    computed: pd.DataFrame,
+    visible: pd.Series,
+    names: list[str],
+    requirements: dict[str, dict],
+) -> None:
+    def complete_window(values: pd.Series, *, window: int) -> pd.Series:
+        return values.rolling(window, min_periods=window).sum().eq(window)
+
+    for name in names:
+        window = int(requirements[name]["warmup_bars"])
+        complete = visible.groupby(computed.symbol, sort=False).transform(
+            complete_window, window=window
+        )
+        computed.loc[~complete, name] = np.nan
+
+
+def _historical_factor_panel(
+    panel: pd.DataFrame,
+    names: list[str],
+    expressions: dict[str, str] | None,
+    requirements: dict[str, dict],
+    sessions: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    """Compute each signal from data visible at its historical decision time."""
+
+    if panel.duplicated(["symbol", "date"]).any():
+        raise ValueError("symbol/date rows must be unique")
+    symbols = pd.Index(panel.symbol.unique())
+    expected_rows = len(symbols) * len(sessions)
+    complete = (
+        len(panel) == expected_rows
+        and panel.date.isin(sessions).all()
+        and panel.groupby("symbol").date.nunique().eq(len(sessions)).all()
+    )
+    original = panel.copy().sort_values(["symbol", "date"]).reset_index(drop=True)
+    original[_SOURCE_ORDER] = np.arange(len(original))
+    has_availability = "available_at" in original
+    late_rows = False
+    if has_availability:
+        original["available_at"] = pd.to_datetime(original.available_at, utc=True)
+        decision_at = original.date.dt.tz_localize("UTC") + _EOD_UTC
+        late_rows = bool(
+            (original.available_at.isna() | original.available_at.gt(decision_at)).any()
+        )
+
+    if not late_rows:
+        inputs = original if complete else _dense_inputs(original, symbols, sessions)
+        computed = compute_research_factors(inputs, names, expressions)
+        if not complete:
+            _mask_incomplete_windows(
+                computed,
+                computed[_SOURCE_ORDER].notna(),
+                names,
+                requirements,
+            )
+        return (
+            computed.loc[computed[_SOURCE_ORDER].notna()]
+            .sort_values(_SOURCE_ORDER)
+            .drop(columns=_SOURCE_ORDER)
+            .reset_index(drop=True)
+        )
+
+    maximum_warmup = max(int(item["warmup_bars"]) for item in requirements.values())
+    value_columns = [
+        column
+        for column in original
+        if column not in {"symbol", "date", "available_at", _SOURCE_ORDER}
+    ]
+    factor_rows = []
+    for evaluation_date in pd.DatetimeIndex(sorted(original.date.unique())):
+        position = sessions.get_loc(evaluation_date)
+        window_dates = sessions[max(0, position - maximum_warmup + 1) : position + 1]
+        window_source = original[original.date.isin(window_dates)]
+        inputs = _dense_inputs(window_source, symbols, window_dates)
+        decision_at = evaluation_date.tz_localize("UTC") + _EOD_UTC
+        visible = (
+            inputs[_SOURCE_ORDER].notna()
+            & inputs.available_at.notna()
+            & inputs.available_at.le(decision_at)
+        )
+        for column in value_columns:
+            inputs[column] = inputs[column].where(visible)
+        computed = compute_research_factors(inputs, names, expressions)
+        _mask_incomplete_windows(computed, visible, names, requirements)
+        current = computed[computed.date.eq(evaluation_date) & computed[_SOURCE_ORDER].notna()]
+        factor_rows.append(current[["symbol", "date", *names]])
+    factors = pd.concat(factor_rows, ignore_index=True)
+    base = original.drop(columns=[name for name in names if name in original])
+    return (
+        base.merge(factors, on=["symbol", "date"], how="left", validate="one_to_one")
+        .sort_values(_SOURCE_ORDER)
+        .drop(columns=_SOURCE_ORDER)
+        .reset_index(drop=True)
+    )
+
+
+def _delay_signal_panel(
+    frame: pd.DataFrame,
+    names: list[str],
+    signal_delay: int,
+    sessions: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    """Rank then delay signals on the complete session grid."""
+
+    result = frame.copy()
+    signals = frame[["symbol", "date", *names]].copy()
+    signals[_SOURCE_ORDER] = np.arange(len(signals))
+    signals[names] = signals.groupby("date")[names].rank(pct=True)
+    dense = _dense_inputs(signals, pd.Index(frame.symbol.unique()), sessions)
+    dense[names] = dense.groupby("symbol", sort=False)[names].shift(signal_delay)
+    delayed = (
+        dense.loc[dense[_SOURCE_ORDER].notna()]
+        .sort_values(_SOURCE_ORDER)[names]
+        .reset_index(drop=True)
+    )
+    result[names] = delayed.to_numpy()
+    return result
+
 
 def factor_requirements(names: list[str]) -> dict[str, dict]:
     """Expose required columns and completed-bar warmup without executing a factor."""
@@ -69,9 +218,23 @@ def factor_report(
         raise ValueError("Factors and positive integer horizons are required")
     panel = prices.copy()
     panel["date"] = pd.to_datetime(panel.date)
+    if panel.date.dt.tz is not None or not panel.date.equals(panel.date.dt.normalize()):
+        raise ValueError("date must contain timezone-naive normalized session dates")
     cutoff_date = pd.Timestamp(cutoff)
+    if cutoff_date.tzinfo is not None or cutoff_date != cutoff_date.normalize():
+        raise ValueError("cutoff must be a timezone-naive session date")
     panel = panel[panel.date < cutoff_date].copy()
-    panel = compute_research_factors(panel, names, expressions).sort_values(["symbol", "date"])
+    grid = (
+        _session_dates(sorted(panel.date.unique()), name="date")
+        if sessions is None
+        else _session_dates(sessions, name="sessions")
+    )
+    grid = grid[grid < cutoff_date]
+    if not panel.date.isin(grid).all():
+        raise ValueError("sessions must contain every price date before cutoff")
+    panel = _historical_factor_panel(panel, names, expressions, requirements, grid).sort_values(
+        ["symbol", "date"]
+    )
     neutralized = (
         neutralize_cross_section(panel, cols=names, by=list(neutralize_by))
         if neutralize_by
@@ -80,17 +243,11 @@ def factor_report(
     if signal_delay:
         # Execution delays per-date percentile ranks, after neutralization.
         # Lag the same representation before cutting the evaluation interval.
-        for transformed in (panel, neutralized):
-            if transformed is not None:
-                transformed[names] = transformed.groupby("date")[names].rank(pct=True)
-                transformed[names] = transformed.groupby("symbol")[names].shift(signal_delay)
+        panel = _delay_signal_panel(panel, names, signal_delay, grid)
+        if neutralized is not None:
+            neutralized = _delay_signal_panel(neutralized, names, signal_delay, grid)
     from quant_data_kit.financial.labels import forward_labels
 
-    grid = (
-        pd.DatetimeIndex(sorted(panel.date.unique()))
-        if sessions is None
-        else pd.DatetimeIndex(sessions)
-    )
     selected = panel[["date", "symbol"]].rename(columns={"symbol": "instrument_id"})
     selected["sample_id"] = (
         selected.instrument_id.astype(str) + ":" + selected.date.dt.strftime("%Y-%m-%d")

@@ -20,6 +20,9 @@ Terminal evidence is per-sample holding-period return with source, availability 
 horizon; sample IDs are `symbol:YYYY-MM-DD`. Use the same economic return-index/share basis.
 If available_at is absent, the report explicitly uses a descriptive end-of-day availability
 assumption; for strict PIT research supply actual availability and an exchange calendar.
+Daily signal decisions use the timezone-naive session date at 23:59 UTC. When actual
+`available_at` is supplied, every rolling dependency must be visible by that decision time;
+late rows do not backfill earlier signals, and missing sessions do not compress windows.
 The default calendar is the union of supplied dates, not proof of complete exchange coverage.
 
 Existing observed-label IC remains descriptive. The new denominator and status breakdown

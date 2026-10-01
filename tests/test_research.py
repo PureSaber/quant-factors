@@ -5,7 +5,13 @@ import pandas as pd
 import pytest
 
 from quant_factors.core import compute_factors
-from quant_factors.research import factor_report, factor_requirements
+from quant_factors.expressions import compute_research_factors, expression_requirements
+from quant_factors.research import (
+    _delay_signal_panel,
+    _historical_factor_panel,
+    factor_report,
+    factor_requirements,
+)
 
 
 def panel():
@@ -41,6 +47,137 @@ def test_cutoff_blocks_future_and_keeps_warmup_missing():
     assert 0 < first["coverage"][0]["coverage"] < 1
     assert first["ic_decay"][0]["rank_ic"] > 0.99
     json.dumps(first, allow_nan=False)
+
+
+def test_actual_availability_blocks_late_historical_signals():
+    p = panel()
+    p["available_at"] = p.date.dt.tz_localize("UTC") + pd.Timedelta(days=10)
+    report = factor_report(
+        p,
+        ["momentum_20d"],
+        horizons=(1,),
+        cutoff="2024-04-01",
+    )
+    assert report["coverage"][0]["valid_rows"] == 0
+    assert report["ic_decay"][0]["sessions"] == 0
+    assert report["ic_decay"][0]["rank_ic"] is None
+
+
+def test_timely_availability_preserves_results_and_computes_once(monkeypatch):
+    p = panel()
+    kwargs = {
+        "names": ["momentum_20d"],
+        "horizons": (1,),
+        "cutoff": "2024-04-01",
+    }
+    expected = factor_report(p, **kwargs)
+    p["available_at"] = p.date.dt.tz_localize("UTC") + pd.Timedelta(hours=20)
+    calls = 0
+
+    def counted(frame, names, expressions=None):
+        nonlocal calls
+        calls += 1
+        return compute_research_factors(frame, names, expressions)
+
+    monkeypatch.setattr("quant_factors.research.compute_research_factors", counted)
+    assert factor_report(p, **kwargs) == expected
+    assert calls == 1
+
+
+def test_missing_session_does_not_compress_momentum_window():
+    p = panel().query("symbol in ['1', '2']").copy()
+    dates = pd.DatetimeIndex(sorted(p.date.unique()))[:30]
+    p = p[p.date.isin(dates)]
+    p = p[~((p.symbol == "1") & (p.date == dates[5]))]
+    computed = _historical_factor_panel(
+        p,
+        ["momentum_20d"],
+        None,
+        expression_requirements(["momentum_20d"]),
+        dates,
+    )
+    row = computed[(computed.symbol == "1") & (computed.date == dates[21])].iloc[0]
+    assert pd.isna(row.momentum_20d)
+    recovered = computed[(computed.symbol == "1") & (computed.date == dates[26])].iloc[0]
+    current = p.loc[(p.symbol == "1") & (p.date == dates[26]), "close"].iloc[0]
+    twenty_sessions_ago = p.loc[(p.symbol == "1") & (p.date == dates[6]), "close"].iloc[0]
+    assert recovered.momentum_20d == pytest.approx(current / twenty_sessions_ago - 1)
+
+
+def test_signal_delay_does_not_skip_a_missing_session():
+    dates = pd.bdate_range("2024-01-01", periods=3)
+    signals = pd.DataFrame(
+        [
+            {"date": dates[0], "symbol": "A", "factor": 1.0},
+            {"date": dates[2], "symbol": "A", "factor": 3.0},
+            {"date": dates[0], "symbol": "B", "factor": 2.0},
+            {"date": dates[1], "symbol": "B", "factor": 2.0},
+            {"date": dates[2], "symbol": "B", "factor": 2.0},
+        ]
+    )
+    delayed = _delay_signal_panel(signals, ["factor"], 1, dates)
+    current = delayed[delayed.date.eq(dates[2])].set_index("symbol")
+    assert pd.isna(current.loc["A", "factor"])
+    assert current.loc["B", "factor"] == pytest.approx(1)
+
+
+def test_late_window_value_cannot_enter_delayed_expression_signal():
+    dates = pd.bdate_range("2024-01-01", periods=12)
+    rows = []
+    for symbol, growth in zip("ABCD", [1.001, 1.002, 1.003, 1.004]):
+        close = 100.0
+        for date in dates:
+            close *= growth
+            rows.append(
+                {
+                    "date": date,
+                    "symbol": symbol,
+                    "close": close,
+                    "return_close": close,
+                    "available_at": date.tz_localize("UTC") + pd.Timedelta(hours=20),
+                }
+            )
+    original = pd.DataFrame(rows)
+    unavailable = original.date.eq(dates[4])
+    original.loc[unavailable, "available_at"] = pd.Timestamp("2025-01-01", tz="UTC")
+    changed = original.copy()
+    changed.loc[unavailable, "close"] *= [2, 3, 4, 5]
+    kwargs = {
+        "names": ["rolling_close"],
+        "expressions": {"rolling_close": "rolling_mean(close, 3)"},
+        "horizons": (1,),
+        "cutoff": "2024-02-01",
+        "signal_delay": 1,
+    }
+    assert factor_report(original, **kwargs) == factor_report(changed, **kwargs)
+
+
+def test_late_row_is_excluded_from_historical_cross_section():
+    date = pd.Timestamp("2024-01-02")
+    p = pd.DataFrame(
+        {
+            "date": date,
+            "symbol": list("ABCD"),
+            "close": [1.0, 2.0, 3.0, 100.0],
+            "available_at": [
+                pd.Timestamp("2024-01-02T20:00:00Z"),
+                pd.Timestamp("2024-01-02T20:00:00Z"),
+                pd.Timestamp("2024-01-02T20:00:00Z"),
+                pd.Timestamp("2024-01-03T00:00:00Z"),
+            ],
+        }
+    )
+    expressions = {"ranked_close": "rank(close)"}
+    computed = _historical_factor_panel(
+        p,
+        ["ranked_close"],
+        expressions,
+        expression_requirements(["ranked_close"], expressions),
+        pd.DatetimeIndex([date]),
+    ).set_index("symbol")
+    assert computed.loc["A", "ranked_close"] == pytest.approx(1 / 3)
+    assert computed.loc["C", "ranked_close"] == pytest.approx(1)
+    assert pd.isna(computed.loc["D", "ranked_close"])
 
 
 def test_sparse_cross_section_is_unavailable():
