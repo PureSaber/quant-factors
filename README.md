@@ -4,6 +4,8 @@
 
 Shared factor computation library for PureSaber quant research.
 
+[完整因子目录](docs/COMPLETE_CATALOG.md)通过 `quant-factors list --all --json` 汇总公开因子入口、输入要求与缓存边界。原有默认目录保留兼容性。
+
 ## Install
 
 ```bash

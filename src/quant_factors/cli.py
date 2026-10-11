@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+from quant_factors.catalog import catalog_text, factor_catalog
 from quant_factors.core import list_factors
 from quant_factors.expressions import compute_research_factors, validate_expressions
 from quant_factors.families import factor_families
@@ -32,6 +33,14 @@ def _print_factor(name: str, description: str, width: int) -> None:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
+    if args.all:
+        catalog = factor_catalog()
+        print(
+            json.dumps(catalog, indent=2, ensure_ascii=False)
+            if args.json
+            else catalog_text(catalog)
+        )
+        return 0
     factors = list_factors()
     if args.json:
         print(json.dumps(factors, indent=2, ensure_ascii=False))
@@ -133,6 +142,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     lst = sub.add_parser("list", help="List built-in factors")
     lst.add_argument("--json", action="store_true")
+    lst.add_argument(
+        "--all",
+        action="store_true",
+        help="Complete versioned catalog, including opt-in and minute factors",
+    )
     lst.set_defaults(func=cmd_list)
 
     compute = sub.add_parser("compute", help="Compute factors from panel data")
