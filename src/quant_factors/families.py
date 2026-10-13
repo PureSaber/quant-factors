@@ -74,6 +74,7 @@ CORE_FAMILIES: dict[str, tuple[str, ...]] = {
     "volatility_20d": ("volatility",),
     "volatility_60d": ("volatility",),
     "downside_vol_20d": ("volatility",),
+    "downside_deviation_20d_v2": ("volatility",),
     "mean_reversion_z_20d": ("reversal",),
     "volume_surge_5d": ("liquidity",),
     "turnover_20d": ("liquidity",),
