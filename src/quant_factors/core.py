@@ -23,7 +23,7 @@ FACTOR_REGISTRY: dict[str, str] = {
     "volatility_10d": "10-day annualized volatility",
     "volatility_20d": "20-day annualized volatility",
     "volatility_60d": "60-day annualized volatility",
-    "downside_vol_20d": "20-day downside deviation annualized",
+    "downside_vol_20d": "Legacy std of zero-clipped returns; use downside_deviation_20d_v2",
     "mean_reversion_z_20d": "Z-score of close vs 20-day mean",
     "volume_surge_5d": "5d vs 20d volume ratio",
     "turnover_20d": "20-day average volume",
@@ -39,6 +39,7 @@ FACTOR_REGISTRY.update(
         "average_volume_20d": "20-day average share volume (legacy turnover_20d alias)",
         "turnover_rate_20d_v2": "20-day mean daily raw shares / PIT raw free-float shares",
         "amihud_illiq_20d_v2": "20-day absolute economic return / actual traded amount",
+        "downside_deviation_20d_v2": "20-day RMS negative return, zero target, annualized sqrt(252)",
     }
 )
 FACTOR_REGISTRY.update(ACADEMIC_REGISTRY)
@@ -70,9 +71,16 @@ def volatility(close: pd.Series, window: int = 20) -> pd.Series:
 
 
 def downside_vol(close: pd.Series, window: int = 20) -> pd.Series:
+    """Historical clipped-return standard deviation; retained for reproducibility."""
     ret = close.pct_change()
     down = ret.where(ret < 0, 0.0)
     return down.rolling(window).std() * np.sqrt(252)
+
+
+def downside_deviation(close: pd.Series, window: int = 20) -> pd.Series:
+    """Zero-target downside deviation over all observed returns, without filling gaps."""
+    ret = close.pct_change(fill_method=None)
+    return np.sqrt(ret.clip(upper=0).pow(2).rolling(window).mean() * 252)
 
 
 def mean_reversion_z(close: pd.Series, window: int = 20) -> pd.Series:
@@ -155,6 +163,7 @@ _FACTOR_COMPUTERS: dict[str, callable] = {
     "volatility_20d": lambda c, v, h, low, pe, pb: volatility(c, 20),
     "volatility_60d": lambda c, v, h, low, pe, pb: volatility(c, 60),
     "downside_vol_20d": lambda c, v, h, low, pe, pb: downside_vol(c, 20),
+    "downside_deviation_20d_v2": lambda c, v, h, low, pe, pb: downside_deviation(c, 20),
     "mean_reversion_z_20d": lambda c, v, h, low, pe, pb: mean_reversion_z(c, 20),
     "volume_surge_5d": lambda c, v, h, low, pe, pb: volume_surge(v, 5, 20),
     "turnover_20d": lambda c, v, h, low, pe, pb: turnover(v, 20),

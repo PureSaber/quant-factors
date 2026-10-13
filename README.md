@@ -16,6 +16,11 @@ python -m pip check
 
 ## Usage
 
+`downside_deviation_20d_v2` is the opt-in zero-target downside deviation:
+`sqrt(252 * rolling_mean(min(daily_return, 0)^2))`, using all 20 daily returns.
+It is not part of the default factor set. The historical `downside_vol_20d`
+retains its clipped-return standard-deviation formula for reproducible old runs.
+
 本版本将QDK固定到`fd080755eebdd5851d98e2b00830235f39ea5ce7`，
 包含共享不可变快照与CAS接口。依赖声明、Python3.10–3.12锁及版本一致性测试
 同步使用该提交；旧发布标签保持原版本。
