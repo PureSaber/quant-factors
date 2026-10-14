@@ -21,7 +21,7 @@ python -m pip check
 It is not part of the default factor set. The historical `downside_vol_20d`
 retains its clipped-return standard-deviation formula for reproducible old runs.
 
-本版本将QDK固定到`fd080755eebdd5851d98e2b00830235f39ea5ce7`，
+本版本将QDK固定到`ad3440700b226497c40093197f1df4321b49d1e8`，
 包含共享不可变快照与CAS接口。依赖声明、Python3.10–3.12锁及版本一致性测试
 同步使用该提交；旧发布标签保持原版本。
 
